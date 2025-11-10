@@ -110,13 +110,14 @@ Start the development server:
 
 Bash
 
-npm run dev  # or npm start
+npm start
 2. Web Frontend (/frontend/ChamCong-Kiosk-ESP32S3)
 Navigate to the frontend directory:
 
 Bash
 
-cd doan
+cd frontend
+cd ChamCong-Kiosk-ESP32S3
 Install dependencies:
 
 Bash
@@ -128,7 +129,7 @@ Start the development server:
 
 Bash
 
-npm run dev  # or npm start
+npm run dev
 Open your browser and visit http://localhost:3000 (or the port specified).
 
 3. Hardware Kiosk (doan)
