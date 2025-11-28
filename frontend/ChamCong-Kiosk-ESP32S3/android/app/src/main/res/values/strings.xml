@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Cham Cong App</string>
+    <string name="title_activity_main">Cham Cong App</string>
+    <string name="package_name">com.chamcong.app</string>
+    <string name="custom_url_scheme">com.chamcong.app</string>
+</resources>

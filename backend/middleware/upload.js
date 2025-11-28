@@ -8,11 +8,8 @@ const storage = multer.diskStorage({
     },
     filename: function(req, file, cb){
         const employeeId = req.body.employee_id || 'unknown';
-        // Prefer the filename sent by the client (e.g. "hung-20251102-224553.jpg").
-        // If not present, fall back to employeeId + unique suffix.
         let orig = file.originalname || '';
-        orig = path.basename(orig); // strip any path
-        // sanitize: allow letters, numbers, dot, underscore, dash
+        orig = path.basename(orig); 
         orig = orig.replace(/[^a-zA-Z0-9._-]/g, '_');
         if (orig && orig.length > 0) {
             cb(null, orig);

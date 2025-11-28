@@ -6,15 +6,25 @@ import ProtectedRoute from './components/ProtectedRoute';
 import EmployeeDashboard from './pages/EmployeeDashboard';
 import ManagePage from './pages/ManagePage.jsx';
 import ReportPage from './pages/ReportPage.jsx';
+import EmployeeProfilePage from './pages/EmployeeProfilePage.jsx';
+import NotificationBell from './components/NotificationBell.jsx';
+import ManagerRequestPage from './pages/ManagerRequestPage.jsx';
+import EmployeeRequestPage from './pages/EmployeeRequestPage.jsx';
+import { TbLayoutDashboardFilled, TbClockCheck } from "react-icons/tb";
+import { FaUsers } from "react-icons/fa";
+import { BiSolidUserCheck } from "react-icons/bi";
+import { CgProfile } from "react-icons/cg";
+import { CiSquareQuestion } from "react-icons/ci";
+import { WebSocketProvider } from './contexts/WebSocketContext.jsx';
+
 
 
 const SidebarLink = ({ to, children, end=false }) => (
   <NavLink
     to={to}
-    // Tailwind sẽ tô màu nền và chữ khi link này "active"
     end={end}
     className={({ isActive }) =>
-      `block px-4 py-3 rounded-md text-sm font-medium transition-colors cursor-pointer
+      `flex items-center px-4 py-3 rounded-md text-sm font-medium transition-colors cursor-pointer
       ${isActive
         ? 'bg-blue-600 text-white'
         : 'text-gray-300 hover:bg-gray-700 hover:text-white'
@@ -27,21 +37,21 @@ const SidebarLink = ({ to, children, end=false }) => (
 
 const ManagerLayout = () => (
   <div className="flex h-screen bg-gray-100">
-    {/* --- Sidebar --- */}
+  
     <div className="flex w-64 flex-col bg-gray-800 text-white">
-      {/* Logo/Header */}
+
       <div className="flex h-16 items-center justify-center px-4 shadow-md">
         <h1 className="text-xl font-bold text-white">Manager</h1>
+        <NotificationBell userRole="manager" />
       </div>
 
-      {/* Navigation Links */}
       <nav className="flex-1 space-y-2 p-4">
-        <SidebarLink to="/manager" end>Trang chủ</SidebarLink>
-        <SidebarLink to="/manager/employees">Quản lý nhân viên</SidebarLink>
-        <SidebarLink to="/manager/reports">Báo cáo</SidebarLink>
+        <SidebarLink to="/manager" end><TbLayoutDashboardFilled className='mr-1' size={16}/>Trang chủ</SidebarLink>
+        <SidebarLink to="/manager/employees"> <FaUsers className='mr-1' size={16}/>Quản lý nhân viên</SidebarLink>
+        <SidebarLink to="/manager/reports"><TbClockCheck className='mr-1' size={16}/>Báo cáo</SidebarLink>
+        <SidebarLink to="/manager/requests"><BiSolidUserCheck className='mr-1' size={16}/>Duyệt yêu cầu</SidebarLink>
       </nav>
 
-      {/* Logout Button (ở dưới cùng) */}
       <div className="p-4">
         <button 
           onClick={() => {
@@ -54,11 +64,9 @@ const ManagerLayout = () => (
         </button>
       </div>
     </div>
-
-    {/* --- Main Content Area --- */}
     <div className="flex-1 flex-col overflow-y-auto">
       <div className="container mx-auto p-6">
-        <Outlet /> {/* Đây là nơi trang của bạn (Dashboard, Report) sẽ hiện ra */}
+        <Outlet /> 
       </div>
     </div>
   </div>
@@ -66,13 +74,14 @@ const ManagerLayout = () => (
 
 const EmployeeLayout = () => (
   <div className="flex h-screen bg-gray-100">
-    {/* --- Sidebar --- */}
     <div className="flex w-64 flex-col bg-gray-800 text-white">
       <div className="flex h-16 items-center justify-center px-4 shadow-md">
         <h1 className="text-xl font-bold text-white">Employee</h1>
+        <NotificationBell userRole="employee" />
       </div>
       <nav className="flex-1 space-y-2 p-4">
-        <SidebarLink to="/employee" end>Trang cá nhân</SidebarLink>
+        <SidebarLink to="/employee" end><CgProfile className='mr-1' size={16}/>Trang cá nhân</SidebarLink>
+        <SidebarLink to="/employee/requests"><CiSquareQuestion className='mr-1' size={16}/>Yêu cầu của tôi</SidebarLink>
       </nav>
       <div className="p-4">
         <button 
@@ -87,10 +96,9 @@ const EmployeeLayout = () => (
       </div>
     </div>
 
-    {/* --- Main Content Area --- */}
     <div className="flex-1 flex-col overflow-y-auto">
       <div className="container mx-auto p-6">
-        <Outlet /> {/* Đây là nơi EmployeeDashboard sẽ hiện ra */}
+        <Outlet /> 
       </div>
     </div>
   </div>
@@ -99,28 +107,39 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* Route Công khai */}
+        
         <Route path="/login" element={<Login />} />
 
-        {/* Route cho Manager (Yêu cầu role="manager") */}
         <Route 
           path="/manager" 
-          element={<ProtectedRoute role="manager"><ManagerLayout /></ProtectedRoute>}
+          element={<ProtectedRoute role="manager">
+            <WebSocketProvider>
+              <ManagerLayout />
+              </WebSocketProvider>
+            </ProtectedRoute>}
         >
           <Route index element={<ManagerDashboard />} /> 
           <Route path="employees" element={<ManagePage />} />
           <Route path="reports" element={<ReportPage />} /> 
+          <Route path="requests" element={<ManagerRequestPage />} />
+          <Route path="employees/:id" element={<EmployeeProfilePage />} />
+          
         </Route>
 
-        {/* Route cho Employee (Yêu cầu role="employee") */}
+        
         <Route 
           path="/employee" 
-          element={<ProtectedRoute role="employee"><EmployeeLayout /></ProtectedRoute>}
+          element={<ProtectedRoute role="employee">  
+            <WebSocketProvider>
+              <EmployeeLayout />
+            </WebSocketProvider>
+            </ProtectedRoute>}
         >
-          <Route index element={<EmployeeDashboard />} /> {/* Trang mặc định /employee */}
+          <Route index element={<EmployeeDashboard />} /> 
+          <Route path="requests" element={<EmployeeRequestPage />} />
         </Route>
 
-        {/* Route mặc định: Tự động chuyển hướng */}
+        
         <Route path="/" element={<HomeRedirect />} />
       </Routes>
     </BrowserRouter>

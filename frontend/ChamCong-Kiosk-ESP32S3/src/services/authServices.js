@@ -1,58 +1,65 @@
-import axios from "axios";
-import {jwtDecode} from "jwt-decode";
 
-const API_URL = `http://localhost:5000/api/auth`;
+import axios from 'axios';
+import { API_BASE_URL } from '../config';
 
-const login = async (email, password) =>{
-    const response = await axios.post(`${API_URL}/login`, {
-        email,
-        password
-    });
-    if(response.data.token){
-        localStorage.setItem("jwtToken", response.data.token);
+const api = axios.create({
+  baseURL: API_BASE_URL 
+});
+
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('token'); 
+    if (token) {
+      config.headers['Authorization'] = 'Bearer ' + token;
     }
-    return response.data;
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
 
-}
 
-const logout = () =>{
-    localStorage.removeItem("jwtToken");
-}
-
-const getToken = () =>{
-    return localStorage.getItem("jwtToken");
-}
-
-const getUser = () =>{
-    try{
-    const token = getToken();
-    if(token){
-        const decoded = jwtDecode(token);
-        return decoded;
-    }
-    return null;
-    }
-    catch(error){
-        return null;
-    }
-}
-
-const getAuthHeader = () =>{
-    const token = getToken();
-    if(token){
-        return {Authorization: `Bearer ${token}`};
-    }
-    else {
-        return {};
-    }
-}
-
-const authService = {
-    login,
-    logout,
-    getToken,
-    getUser,
-    getAuthHeader
+const login = async (email, password) => {
+  const response = await api.post('/api/auth/login', { email, password });
+  
+  if (response.data.token) {
+    localStorage.setItem('token', response.data.token);
+    localStorage.setItem('user', JSON.stringify(response.data.user));
+  }
+  return response.data;
 };
 
-export default authService;
+const logout = () => {
+  localStorage.removeItem('token');
+  localStorage.removeItem('user');
+};
+
+const getToken = () => {
+  return localStorage.getItem('token');
+};
+
+const getUser = () => {
+  const userString = localStorage.getItem('user');
+  
+  if (!userString || userString === "undefined") {
+    return null;
+  }
+  
+  try {
+    return JSON.parse(userString);
+  } catch (error) {
+    console.error("AuthService: Lỗi parse user từ localStorage", error);
+    localStorage.removeItem('user'); 
+    return null;
+  }
+};
+
+export { api };
+
+export default {
+  login,
+  logout,
+  getToken,
+  getUser,
+};

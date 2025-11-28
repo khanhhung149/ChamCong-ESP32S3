@@ -9,6 +9,7 @@ import authRouter from './routes/auth.js'
 import http from 'http';
 import { WebSocketServer } from 'ws';
 import jwt from 'jsonwebtoken';
+import { createAndSendNotification, getMyNotifications, markAsRead } from './controllers/notification_Controller.js';
 
 //Cấu hình
 const app = express();
@@ -33,13 +34,19 @@ const broadcastToAdmins = (message) => {
         ? JSON.stringify(message) 
         : message;
         
-    admins.forEach(a => {
-        if (a.readyState === a.OPEN) a.send(payload);
+    activeConnections.forEach((ws, userId) => {
+        // (Bạn có thể kiểm tra role ở đây nếu muốn, nhưng không cần thiết)
+        if (ws.readyState === ws.OPEN) {
+            ws.send(payload);
+        }
     });
 }
 
 app.use((req, res, next) => {
+    // Truyền 2 hàm này vào TẤT CẢ request
+    // để các controller có thể sử dụng
     req.broadcastToAdmins = broadcastToAdmins;
+    req.getActiveConnections = () => activeConnections; // Thêm hàm này
     next();
 });
 
@@ -55,18 +62,21 @@ const server = http.createServer(app);
 // Create WebSocket server
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-// track clients by role
 const devices = new Set();
-const admins = new Set();
+// Ánh xạ từ User ID (từ MongoDB) -> kết nối WebSocket
+const activeConnections = new Map(); 
+// Ánh xạ từ WebSocket -> User ID (để dọn dẹp khi ngắt kết nối)
+const wsToUser = new Map();
 
 const broadcastKioskStatus = () => {
   const statusMessage = JSON.stringify({
     type: 'kiosk_status', // Tên tin nhắn mới
     count: devices.size  // Số lượng Kiosk đang kết nối
   });
-  admins.forEach(admin => {
-    if (admin.readyState === admin.OPEN) {
-      admin.send(statusMessage);
+  activeConnections.forEach((ws, userId) => {
+    // Chỉ gửi cho các kết nối là 'manager'
+    if (ws.role === 'manager' && ws.readyState === ws.OPEN) {
+        ws.send(statusMessage);
     }
   });
 };
@@ -80,6 +90,7 @@ wss.on('connection', (ws, req) => {
     ws.on('pong', () => { ws.isAlive = true; });
 
     ws.on('message', (message) => {
+        ws.isAlive = true;
         try {
             const raw = message.toString();
             const txt = raw.trim();
@@ -98,21 +109,39 @@ wss.on('connection', (ws, req) => {
                         console.log('WS: Admin verified:', decoded._id);
                         ws.isAuthenticated = true;
                         ws.role = 'manager';
-                        admins.add(ws); // <-- CHỈ THÊM KHI ĐÃ XÁC THỰC
+                        const userId = decoded._id.toString(); // Lấy ID của Admin
+                        activeConnections.set(userId, ws); // Lưu kết nối
+                        wsToUser.set(ws, userId);
                         ws.send("auth:success"); // Báo cho React là đã OK
                         broadcastKioskStatus();
                     } else {
                         ws.send("auth:failed:invalid_role");
-                        ws.terminate();
+                        // ws.terminate(); // <-- XÓA DÒNG NÀY
                     }
                 } catch (e) {
                     console.log("WS: Auth failed, invalid token");
                     ws.send("auth:failed:invalid_token");
-                    ws.terminate();
+                    // ws.terminate(); // <-- XÓA DÒNG NÀY
                 }
                 return;
             }
-
+            else if (txt.startsWith('auth:employee:')) {
+                const token = txt.substring(14);
+                try {
+                    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+                    if (decoded && decoded.role === 'employee') {
+                        // ... (code đúng rồi)
+                        ws.send("auth:success");
+                    } else {
+                        ws.send("auth:failed:invalid_role"); // <-- Thêm dòng này
+                        // ws.terminate(); // <-- XÓA DÒNG NÀY
+                    }
+                } catch (e) {
+                    ws.send("auth:failed:invalid_token"); // <-- Thêm dòng này
+                    // ws.terminate(); // <-- XÓA DÒNG NÀY
+                }
+                return;
+            }
             // Client là Kiosk (ESP32)
             if (txt === 'role:device') {
                 console.log('WS: Kiosk connected');
@@ -150,8 +179,11 @@ wss.on('connection', (ws, req) => {
             // 2. Chỉ Kiosk mới được gửi tiến độ
             if (ws.role === 'device') {
                 // Kiosk gửi (VD: "progress:...") -> Chuyển tiếp cho Admin
-                admins.forEach(a => {
-                    if (a.readyState === a.OPEN) a.send(txt);
+                activeConnections.forEach((ws, userId) => {
+                    // Chỉ gửi cho các kết nối là 'manager'
+                    if (ws.role === 'manager' && ws.readyState === ws.OPEN) {
+                        ws.send(txt);
+                    }
                 });
                 return;
             }
@@ -164,7 +196,12 @@ wss.on('connection', (ws, req) => {
     ws.on('close', () => {
         const wasDevice = devices.has(ws);
         devices.delete(ws);
-        admins.delete(ws);
+        if (wsToUser.has(ws)) {
+            const userId = wsToUser.get(ws);
+            activeConnections.delete(userId); // Xóa khỏi map
+            wsToUser.delete(ws);
+            console.log(`WS: User ${userId} disconnected`);
+        }
         console.log('WS: client disconnected');
 
         if (wasDevice) {

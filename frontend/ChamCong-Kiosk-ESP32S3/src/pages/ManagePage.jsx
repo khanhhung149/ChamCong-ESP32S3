@@ -1,7 +1,7 @@
-import React, {useState, useEffect, useRef} from 'react'
-import axios from 'axios'
-import authService from '../services/authServices.js'
-import { Link } from 'react-router-dom'; // <-- Thêm Link
+import React, {useState, useEffect} from 'react'
+import { Link } from 'react-router-dom';
+import { useWebSocket } from '../contexts/WebSocketContext.jsx';
+import { api } from '../services/authServices.js';
 
 const Button= ({children, onClick, className='', type='button'}) =>(
     <button type={type} onClick={onClick} className={`px-4 py-2 font-semibold text-white transition-colors duration-200 rounded-md ${className}`}>
@@ -10,7 +10,7 @@ const Button= ({children, onClick, className='', type='button'}) =>(
 )
 const StatusBadge =({status}) =>{
     let colorClass = 'bg-gray-500';
-    if(status.includes('Đã kết nối')) colorClass = 'bg-green-500';
+    if(status.includes('Online')) colorClass = 'bg-green-500';
     if(status.includes('Lỗi') || status.includes('Offline')) colorClass = 'bg-red-500';
     return (
         <span className={`px-3 py-1 text-sm font-medium text-white rounded-full ${colorClass}`}>
@@ -23,77 +23,53 @@ const ManagePage = () => {
     const [users, setUsers] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
-
+    
+    const { kioskCount, lastTextMessage, sendWsMessage, isWsReady } = useWebSocket();
     const [adminWsStatus, setAdminWsStatus] = useState('Đang kết nối Server...');
-    const [kioskCount, setKioskCount] = useState(0); // <-- State mới để đếm Kiosk
-    const ws = useRef(null);
 
-    useEffect(() => {
-        if (ws.current) return; // Chỉ kết nối 1 lần
-        const wsClient = new WebSocket('ws://192.168.88.119:5000/ws');
-        ws.current = wsClient;
-
-        wsClient.onopen = () => {
-            const token = authService.getToken();
-            if (token) {
-                wsClient.send(`auth:admin:${token}`); // Xác thực
-            }
-        };
-
-        wsClient.onmessage = (event) => {
-            const msgText = event.data;
-            console.log('WS (ManagePage):', msgText);
-
-            try {
-                // Thử parse JSON trước (cho tin nhắn status)
-                const msg = JSON.parse(msgText);
-
-                if (msg.type === 'kiosk_status') {
-                    setKioskCount(msg.count); // <-- Cập nhật số lượng Kiosk
-                }
-                
-            } catch (e) {
-                // Nếu không phải JSON, xử lý text
-                if (msgText === 'auth:success') {
-                    setAdminWsStatus('Đã kết nối Server');
-                    // Server sẽ gửi 'kiosk_status' ngay sau đây
-                } else if (msgText.startsWith('progress:')) {
-                    const parts = msgText.split(':');
-                    setAdminWsStatus(`Đang đăng ký ${parts[1]}... (${parts[2]})`);
-                } else if (msgText.startsWith('enroll_done:')) {
-                    setAdminWsStatus('Đăng ký Hoàn tất!');
-                } else if (msgText === 'db_cleared') {
-                    alert('Database trên Kiosk đã bị xóa!');
-                }
-            }
-        };
-        
-        wsClient.onclose = () => {
-            setAdminWsStatus('Server Offline');
-            setKioskCount(0); // Nếu rớt mạng, coi như Kiosk offline
-        };
-        wsClient.onerror = (err) => setAdminWsStatus("Lỗi kết nối Server");
-        
-        return () => {
-            wsClient.close();
-            ws.current = null;
-        };
-    }, []);
+    const [isEnrolling, setIsEnrolling] = useState(false);
+    const [enrollStatusText, setEnrollStatusText] = useState('');
 
     const [formData, setFormData]= useState({
         name:'',
-        employee_id:'',
+        // employee_id:'',
         email:'',
         password:'',
         role:'employee'
     });
 
+    useEffect(() => {
+        if (lastTextMessage === 'auth:success') {
+            setAdminWsStatus('Đã kết nối Server');
+        } else if (lastTextMessage.startsWith('progress:')) {
+            const parts = lastTextMessage.split(':');
+            const statusMsg = `Đang đăng ký ${parts[1]}... (${parts[2]})`;
+            
+            setAdminWsStatus(statusMsg);
+            setIsEnrolling(true);
+            setEnrollStatusText(statusMsg);
+        } else if (lastTextMessage.startsWith('enroll_done:')) {
+            const parts = lastTextMessage.split(':');
+            const statusMsg = `Đăng ký Hoàn tất cho ${parts[1]} (${parts[2]})!`;
+
+            setAdminWsStatus('Đăng ký Hoàn tất!');
+
+            setEnrollStatusText(statusMsg); 
+            
+            setTimeout(() => {
+                setIsEnrolling(false);
+                setEnrollStatusText('');
+                setAdminWsStatus('Đã kết nối Server');
+            }, 3000);
+        } else if (lastTextMessage === 'db_cleared') {
+            alert('Database trên Kiosk đã bị xóa!');
+        }
+    }, [lastTextMessage]);
+
     const fetchUsers = async()=>{
         setLoading(true);
         try{
-            const response = await axios.get('http://localhost:5000/api/users', {
-                headers: authService.getAuthHeader(),
-            });
+            const response = await api.get('/api/users');
             setUsers(response.data);
         }
         catch(error){
@@ -110,9 +86,7 @@ const ManagePage = () => {
   const handleDelete = async(userId, name) =>{
     if(window.confirm(`Bạn có chắc chắn muốn xóa nhân viên ${name}?`)){
     try{
-        await axios.delete(`http://localhost:5000/api/users/${userId}`, {
-            headers: authService.getAuthHeader(),
-        });
+        await api.delete(`/api/users/${userId}`);
         setUsers(prevUsers => prevUsers.filter(user => user._id !== userId));
     }
     catch(error){
@@ -132,23 +106,17 @@ const ManagePage = () => {
 
   const handleSubmit = async(e) =>{
     e.preventDefault();
-    if(!formData.email || !formData.password || !formData.name || !formData.employee_id){
+    if(!formData.email || !formData.password || !formData.name){
         setError('Vui lòng điền tất cả các trường thông tin bắt buộc.');
         return;
     }
     try{
-        await axios.post('http://localhost:5000/api/users', formData, {
-            headers: authService.getAuthHeader(),
-        });
-        setUsers(prevUsers => [res.data, ...prevUsers]);
-        setFormData({
-            name:'',
-            employee_id:'',
-            email:'',
-            password:'',
-            role:'employee'
-        });
-        setError('');
+        const res = await api.post('/api/users', formData);
+            setUsers(prevUsers => [res.data, ...prevUsers]);
+            setFormData({
+                name:'', email:'', password:'', role:'employee'
+            });
+            setError('');
     }
     catch(error){
         setError('Lỗi khi thêm nhân viên');
@@ -157,41 +125,63 @@ const ManagePage = () => {
     }
   }
 
-  const sendWsCommand = (command) => {
-        if (kioskCount === 0) { // <-- SỬA: Kiểm tra Kiosk có online không
+
+    const handleEnroll = (employeeId) => {
+        if (kioskCount === 0) {
             alert('Kiosk đang Offline! Không thể gửi lệnh.');
             return;
         }
-        if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-            ws.current.send(command);
-        } else {
-            alert('Chưa kết nối WebSocket (Server Offline)!');
-        }
-    };
-
-    // Hàm kích hoạt Enroll (UC-07)
-    const handleEnroll = (employeeId) => {
         if (!employeeId) {
             alert('Lỗi: Nhân viên này chưa có Mã NV (employee_id).');
             return;
         }
         if (window.confirm(`Bạn có muốn kích hoạt Kiosk để đăng ký khuôn mặt cho ${employeeId}?`)) {
-            setWsStatus(`Đang gửi lệnh enroll cho ${employeeId}...`);
-            sendWsCommand(`enroll:${employeeId}`);
+            setAdminWsStatus(`Đang gửi lệnh enroll cho ${employeeId}...`);
+            sendWsMessage(`enroll:${employeeId}`);
         }
     };
 
-    // Hàm xóa DB Kiosk (UC-08)
-    const handleClearKioskDB = () => {
-        if (window.confirm('CẢNH BÁO: Bạn có CHẮC muốn XÓA HẾT khuôn mặt trên Kiosk?')) {
-            sendWsCommand('delete_all');
+    const handleClearKioskDB = async () => {
+        if (kioskCount === 0) {
+            alert('Kiosk đang Offline! Không thể gửi lệnh.');
+            return;
+        }
+        if (window.confirm('CẢNH BÁO: Bạn có CHẮC muốn XÓA HẾT khuôn mặt trên Kiosk VÀ reset trạng thái database?')) {
+            try {
+                sendWsMessage('delete_all');
+                await api.post('/api/users/reset-all-enrollment');
+                alert('Đã xóa DB Kiosk và reset trạng thái server.');
+
+                fetchUsers(); 
+            } catch (error) {
+                alert('Có lỗi xảy ra khi reset server: ' + error.message);
+            }
         }
     };
+    const handleDumpDB = () => {
+        if (kioskCount === 0) {
+            alert('Kiosk đang Offline! Không thể gửi lệnh.');
+            return;
+        }
+        sendWsMessage('dump_db');
+    };
+
+    const LoadingModal = ({ text }) => (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm">
+            <div className="flex flex-col items-center justify-center p-8 bg-white rounded-lg shadow-xl">
+                <div className="w-12 h-12 border-4 border-t-4 border-gray-200 border-t-blue-600 rounded-full animate-spin mb-4"></div>
+                <span className="text-lg font-medium text-gray-700">{text}</span>
+            </div>
+        </div>
+    );
   return (
         <div className='space-y-6'>
+
+            {console.log("RENDER: isEnrolling =", isEnrolling)}
+            {isEnrolling && <LoadingModal text={enrollStatusText} />}
+
             <div className="flex items-center justify-between">
                 <h1 className='text-3xl font-bold text-gray-800'>Quản lý Nhân viên & Kiosk</h1>
-                {/* (PHẦN MỚI) Hiển thị trạng thái WS */}
                 <StatusBadge 
                     status={kioskCount > 0 ? `Kiosk Online (${kioskCount})` : 'Kiosk Offline'} 
                 />
@@ -200,16 +190,15 @@ const ManagePage = () => {
             <div className='p-6 bg-white rounded-xl shadow-lg'>
                 <h2 className='text-xl font-semibold mb-5 text-gray-700'>Điều khiển Kiosk (UC-07, 08)</h2>
                 <div className="flex space-x-3">
-                    <Button onClick={handleClearKioskDB} className="bg-red-600 hover:bg-red-700">
+                    <Button onClick={handleClearKioskDB} className="bg-red-600 hover:bg-red-700 disabled:opacity-50" disabled={!isWsReady}>
                         Xóa sạch DB Kiosk
                     </Button>
-                    <Button onClick={() => sendWsCommand('dump_db')} className="bg-yellow-500 hover:bg-yellow-600">
+                    <Button onClick={handleDumpDB} className="bg-yellow-500 hover:bg-yellow-600 disabled:opacity-50" disabled={!isWsReady}>
                         Dump DB (Kiểm tra)
                     </Button>
                 </div>
             </div>
 
-            {/* --- Form Thêm Mới (Styled) --- */}
             <div className='p-6 bg-white rounded-xl shadow-lg'>
                 <h2 className='text-xl font-semibold mb-5 text-gray-700'>Thêm Nhân viên mới</h2>
                 <form onSubmit={handleSubmit} className='space-y-4'>
@@ -219,11 +208,7 @@ const ManagePage = () => {
                             <input type="text" name="name" value={formData.name} onChange={handleInputChange}
                                 className='mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500' />
                         </div>
-                        <div>
-                            <label className='block text-sm font-medium text-gray-700'>Mã nhân viên *</label>
-                            <input type="text" name="employee_id" value={formData.employee_id} onChange={handleInputChange}
-                                className='mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500' />
-                        </div>
+                        
                         <div>
                             <label className='block text-sm font-medium text-gray-700'>Email *</label>
                             <input
@@ -257,7 +242,6 @@ const ManagePage = () => {
                 </form>
             </div>
 
-            {/* --- Bảng Danh sách (Styled) --- */}
             <div className='p-6 bg-white rounded-xl shadow-lg'>
                 <h2 className='text-xl font-semibold mb-4 text-gray-700'>Danh sách nhân viên</h2>
                 {loading ? (

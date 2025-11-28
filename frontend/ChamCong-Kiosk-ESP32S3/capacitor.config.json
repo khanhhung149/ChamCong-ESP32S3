@@ -1,0 +1,11 @@
+{
+  "appId": "com.chamcong.app",
+  "appName": "Cham Cong App",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "http",
+    "allowNavigation": [
+      "192.168.88.119" 
+    ]
+  }
+}

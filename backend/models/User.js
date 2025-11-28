@@ -9,7 +9,7 @@ const userSchema = new mongoose.Schema({
     password: { type: String, required: true },
   role: { 
     type: String, 
-    enum: ['employee', 'manager'], // Chỉ chấp nhận 1 trong 2 giá trị
+    enum: ['employee', 'manager'], 
     required: true,
     default: 'employee' 
   },

@@ -13,13 +13,13 @@ const Login = () => {
         try{
             const data = await authService.login(email, password);
 
-            const user = authService.getUser();
-
-            if(user.role ==='manager'){
+            if (data.user && data.user.role ==='manager'){
                 navigate('/manager');
             }
-            else{
+            else if (data.user) { 
                 navigate('/employee');
+            } else {
+                setError('Đăng nhập thành công nhưng không lấy được thông tin user.');
             }
         }catch(error){
             setError('Đăng nhập thất bại. Vui lòng kiểm tra lại Email hoặc Mật khẩu.');
@@ -31,7 +31,6 @@ const Login = () => {
     <div className='flex flex-cols items-center h-screen justify-center flex-col gap-4 bg-[url(../background.jpg)] bg-cover space-y-6'>
       <h2 className='font-bungee text-white text-3xl font-bold drop-shadow-lg'>Hệ thống chấm công</h2>
       <div className='w-96 rounded-xl bg-black/20 p-8 shadow-xl backdrop-blur-md border border-white/10'>
-        {/* <h3 className='text-2xl font-bold mb-4'>Đăng nhập</h3> */}
         <form onSubmit={handleSubmit}>
             
             <div className='mb-4'>
