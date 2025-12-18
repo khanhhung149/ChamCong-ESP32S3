@@ -57,9 +57,20 @@ export const getLogs = async (req, res) => {
     }
 };
 
+const parseEspTimestamp = (tsStr) => {
+    if (!tsStr || tsStr.length < 15) return new Date();
+    const y = tsStr.substring(0, 4);
+    const m = tsStr.substring(4, 6);
+    const d = tsStr.substring(6, 8);
+    const h = tsStr.substring(9, 11);
+    const min = tsStr.substring(11, 13);
+    const s = tsStr.substring(13, 15);
+    return new Date(y, m - 1, d, h, min, s);
+};
+
 export const logAttendance = async (req, res) => {
     try {
-        const { employee_id } = req.body;
+        const { employee_id, timestamp } = req.body;        
         if (!req.file || !employee_id) {
             return res.status(400).send({ message: 'Lỗi thiếu employee_id hoặc ảnh' });
         }
@@ -69,7 +80,13 @@ export const logAttendance = async (req, res) => {
             return res.status(404).send({ message: 'Nhân viên không tồn tại' });
         }
 
-        const now = new Date(); 
+        let now;
+        if (timestamp) {
+            console.log(`Nhan timestamp tu Thiet bi: ${timestamp}`);
+            now = parseEspTimestamp(timestamp);
+        } else {
+            now = new Date();
+        }
         const imagePath = `/public/attendance_imgs/${req.file.filename}`;
         
         const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
@@ -97,11 +114,16 @@ export const logAttendance = async (req, res) => {
             savedLog = await newLog.save();
             logType = 'check_in';
         } else {
-            console.log(`CHECK-OUT cho: ${employee_id}`);
-            existingRecord.checkOutTime = now; 
-            existingRecord.checkOutImage = imagePath; 
-            savedLog = await existingRecord.save();
-            logType = 'check_out';
+            if (now > existingRecord.checkInTime) {
+                console.log(`CHECK-OUT cho: ${employee_id} luc ${now.toLocaleString()}`);
+                existingRecord.checkOutTime = now;
+                existingRecord.checkOutImage = imagePath;
+                savedLog = await existingRecord.save();
+                logType = 'check_out';
+            } else {
+                console.log(`Cap nhat log cu...`);
+                savedLog = existingRecord;
+            }
         }
 
         req.broadcastToAdmins({

@@ -31,7 +31,7 @@ const EmployeeProfilePage = () => {
 
   const [formData, setFormData] = useState({
     name:'',
-    email:'',
+    account:'',
     employee_id:'',
     role:'employee'
   });
@@ -45,7 +45,7 @@ const EmployeeProfilePage = () => {
         setUser(userRes.data);
         setFormData({
             name: userRes.data.name,
-            email: userRes.data.email,
+            account: userRes.data.account,
             employee_id: userRes.data.employee_id,
             role: userRes.data.role,
         });
@@ -98,7 +98,7 @@ const EmployeeProfilePage = () => {
               className="w-40 h-40 rounded-full mx-auto mb-4 object-cover border-4 border-gray-200"
             />
             <h2 className="text-2xl font-semibold">{user.name}</h2>
-            <p className="text-gray-500">{user.email}</p>
+            <p className="text-gray-500">{user.account}</p>
             <p className="text-gray-500">Mã NV: {user.employee_id}</p>
           </div>
 
@@ -126,14 +126,14 @@ const EmployeeProfilePage = () => {
                                 <input type="text" name="employee_id" value={formData.employee_id} onChange={handleInputChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"/>
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-gray-700">Email</label>
-                                <input type="email" name="email" value={formData.email} onChange={handleInputChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"/>
+                                <label className="block text-sm font-medium text-gray-700">Tài khoản</label>
+                                <input type="text" name="account" value={formData.account} onChange={handleInputChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"/>
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">Phân quyền</label>
-                                <select name="role" value={formData.role} onChange={handleInputChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md bg-white">
-                                    <option value="employee">Employee</option>
-                                    <option value="manager">Manager</option>
+                                <select name="role" value={formData.role} o nChange={handleInputChange} className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md bg-white">
+                                    <option value="employee">Nhân viên</option>
+                                    <option value="manager">Quản lý</option>
                                 </select>
                             </div>
                         </div>

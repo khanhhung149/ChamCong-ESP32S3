@@ -1,8 +1,8 @@
-import { Router } from "express";
+import express from "express";
 import upload from "../middleware/upload.js";
 import myAvatarUpload from "../middleware/avatarUpload.js";
 import { logAttendance, getLogs, getMyLogs } from "../controllers/attendance_Controller.js";
-import { protect, isManager } from "../middleware/authMiddleware.js";
+import { protect, authorize } from "../middleware/authMiddleware.js";
 import { getAllUsers, createUser, deleteUser, getUserById, updateUser, getUserLogs, getMyProfile, uploadMyAvatar, updateUserEnrollStatus, resetAllEnrollment} from "../controllers/user_Controller.js";
 import {getDashboardStats, getTodayLogs, exportLogsExcel} from "../controllers/stats_Controller.js";
 import { getMyNotifications, markAsRead } from "../controllers/notification_Controller.js";
@@ -14,8 +14,8 @@ import {
     getManagerList
 } from '../controllers/request_Controller.js';
 
-const router = Router();
-// === API Kiosk ===
+const router = express.Router();
+// === API Thiet bi ===
 router.post('/log-attendance', upload.single('image'), logAttendance);
 router.put('/users/enroll-status', updateUserEnrollStatus);
 
@@ -29,27 +29,34 @@ router.post('/requests', protect, createRequest);
 router.get('/requests/my', protect, getMyRequests);
 
 // === API Thống kê (Manager) ===
-router.get('/logs', protect, isManager, getLogs);
-router.get('/stats/dashboard', protect, isManager, getDashboardStats);
-router.get('/stats/today_logs', protect, isManager, getTodayLogs);
-router.get('/logs/export', protect, isManager, exportLogsExcel);
+router.get('/logs', protect, authorize('manager', 'admin'), getLogs);
+router.get('/stats/dashboard', protect, authorize('manager', 'admin'), getDashboardStats);
+router.get('/stats/today_logs', protect, authorize('manager', 'admin'), getTodayLogs);
+router.get('/logs/export', protect, authorize('manager', 'admin'), exportLogsExcel);
 
 // === API Quản lý Nhân viên (Manager) ===
 router.route('/users')
-.post(protect, isManager, createUser)
-.get(protect, isManager, getAllUsers);
-router.post('/users/reset-all-enrollment', protect, isManager, resetAllEnrollment);
-router.get('/requests', protect, isManager, getAllRequests);
+.post(protect, authorize('manager', 'admin'), createUser)
+.get(protect, authorize('manager', 'admin'), getAllUsers);
+// router.post('/users/reset-all-enrollment', protect, authorize('manager', 'admin'), resetAllEnrollment);
+router.get('/requests', protect, authorize('manager', 'admin'), getAllRequests);
 router.get('/managers', protect, getManagerList);
 
 // === API Quản lý từng Nhân viên (Manager) ===
 router.route('/users/:id')
-    .get(protect, isManager, getUserById)
-    .put(protect, isManager, updateUser)
-    .delete(protect, isManager, deleteUser);
-router.put('/requests/:id', protect, isManager, updateRequestStatus);
+    .get(protect, authorize('admin'), getUserById)
+    .put(protect, authorize('manager', 'admin'), updateUser)
+    .delete(protect, authorize('admin'), deleteUser);
+
+
+router.put('/requests/:id', protect, authorize('manager'), updateRequestStatus);
 
 // API xem log của 1 user
-router.get('/users/:id/logs', protect, isManager, getUserLogs);
+router.get('/users/:id/logs', protect, authorize('manager', 'admin'), getUserLogs);
+
+
+
+
+
 
 export default router;

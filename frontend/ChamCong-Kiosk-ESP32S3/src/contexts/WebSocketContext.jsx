@@ -12,7 +12,7 @@ const RECONNECT_INTERVAL = 5000;
 
 export const WebSocketProvider = ({ children }) => {
     const [wsStatus, setWsStatus] = useState('Đang kết nối...');
-    const [kioskCount, setKioskCount] = useState(0);
+    const [deviceCount, setDeviceCount] = useState(0);
     const [lastJsonMessage, setLastJsonMessage] = useState(null);
     const [lastTextMessage, setLastTextMessage] = useState('');
     
@@ -51,10 +51,15 @@ export const WebSocketProvider = ({ children }) => {
             console.log("WebSocket Context: Đã kết nối.");
             setWsStatus('Đã kết nối Server');
             const token = authService.getToken();
+            
             if (token) {
-                const authMessage = user.role === 'manager' 
+                // [SỬA LỖI TẠI ĐÂY]
+                // Nếu là manager HOẶC admin thì đều dùng auth:admin
+                const authMessage = (user.role === 'manager' || user.role === 'admin')
                     ? `auth:admin:${token}` 
                     : `auth:employee:${token}`;
+                
+                console.log(`[WS] Sending auth for role: ${user.role}`);
                 wsClient.send(authMessage);
             }
         };
@@ -64,8 +69,8 @@ export const WebSocketProvider = ({ children }) => {
             try {
                 const msgJson = JSON.parse(msgText);
                 console.log("WS Context (JSON):", msgJson);
-                if (msgJson.type === 'kiosk_status') {
-                    setKioskCount(msgJson.count);
+                if (msgJson.type === 'device_status') {
+                    setDeviceCount(msgJson.count);
                 }
                 setLastJsonMessage(msgJson);
             } catch (e) {
@@ -126,12 +131,12 @@ export const WebSocketProvider = ({ children }) => {
 
     const value = useMemo(() => ({
         wsStatus,
-        kioskCount,
+        deviceCount,
         lastJsonMessage,
         lastTextMessage,
         sendWsMessage,
         isWsReady
-    }), [wsStatus, kioskCount, lastJsonMessage, lastTextMessage, sendWsMessage, isWsReady]);
+    }), [wsStatus, deviceCount, lastJsonMessage, lastTextMessage, sendWsMessage, isWsReady]);
 
     return (
         <WebSocketContext.Provider value={value}>

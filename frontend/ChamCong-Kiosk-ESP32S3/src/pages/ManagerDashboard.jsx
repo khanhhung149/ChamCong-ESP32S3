@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useWebSocket } from '../contexts/WebSocketContext.jsx';
 import { API_BASE_URL } from '../config.js'; 
 import { api } from '../services/authServices.js'; 
+import authService from '../services/authServices.js';
 
 const StatsCard = ({ title, value, unit, icon, colorClass }) => (
   <div className={`p-6 bg-white rounded-xl shadow-lg flex items-center justify-between ${colorClass}`}>
@@ -34,7 +35,11 @@ const ManagerDashboard = () => {
   const [todayLogs, setTodayLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   
-  const { kioskCount, lastJsonMessage } = useWebSocket();
+  const { deviceCount, lastJsonMessage } = useWebSocket();
+  const activeCount = deviceCount || 0;
+
+  const currentUser = authService.getUser();
+  const isAdmin = currentUser?.role === 'admin';
 
 
   const fetchDashboardData = async () => {
@@ -44,9 +49,6 @@ const ManagerDashboard = () => {
       setStats(statsRes.data);
 
       const logsRes = await api.get('/api/stats/today_logs');
-        
-      
-      
       setTodayLogs(logsRes.data);
 
     } catch (error) {
@@ -81,16 +83,16 @@ const ManagerDashboard = () => {
 
   return (
     <div className="space-y-8">
-      <h1 className="text-3xl font-bold text-gray-800">Trang chủ Manager</h1>
+      <h1 className="text-3xl font-bold text-gray-800">{isAdmin ? "Tổng quan Hệ thống (Admin)" : "Trang chủ Manager"}</h1>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatsCard title="Tổng số Nhân viên" value={stats.totalUsers} colorClass="bg-blue-100 text-blue-800" />
         <StatsCard title="Hiện diện Hôm nay" value={stats.presentToday} colorClass="bg-green-100 text-green-800" />
         <StatsCard title="Vắng mặt Hôm nay" value={stats.absentToday} colorClass="bg-red-100 text-red-800" />
         <StatsCard 
-            title="Trạng thái Kiosk" 
-            value={kioskCount > 0 ? `Online (${kioskCount})` : 'Offline'} 
-            colorClass={kioskCount > 0 ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-800"} 
+            title="Trạng thái Thiết bị" 
+            value={activeCount > 0 ? `Online (${activeCount})` : 'Offline'} 
+            colorClass={activeCount > 0 ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-800"} 
         />
       </div>
 

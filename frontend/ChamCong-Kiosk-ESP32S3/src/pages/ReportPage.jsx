@@ -2,6 +2,7 @@ import React, { useEffect, useState} from 'react'
 import { api } from '../services/authServices.js';
 import { API_BASE_URL } from '../config.js';
 import { saveAs } from 'file-saver';
+import authService from '../services/authServices.js';
 
 const PaginationControls = ({ currentPage, totalPages, onPageChange }) => {
     if (totalPages <= 1) return null;
@@ -74,6 +75,9 @@ const ReportPage = () => {
 
     const [isExporting, setIsExporting] = useState(false);
 
+    const currentUser = authService.getUser();
+    const isAdmin = currentUser?.role === 'admin';
+
     const fetchLogs = async(page = 1)=>{
         setLoading(true);
         try{
@@ -137,7 +141,7 @@ const ReportPage = () => {
     };
   return (
         <div className="space-y-6">
-            <h1 className="text-3xl font-bold text-gray-800">Báo cáo Chấm công</h1>
+            <h1 className="text-3xl font-bold text-gray-800">{isAdmin ? "Bảng chấm công" : "Báo cáo Chấm công"}</h1>
 
             <div className="p-6 bg-white rounded-xl shadow-lg">
                 <h2 className="text-xl font-semibold mb-4 text-gray-700">Bộ lọc báo cáo</h2>
@@ -164,13 +168,15 @@ const ReportPage = () => {
                         >
                             {loading ? 'Đang tải...' : 'Lọc Báo cáo'}
                         </button>
-                        <button
-                            onClick={handleExport}
-                            disabled={isExporting}
-                            className="px-4 py-2 font-semibold text-white bg-green-600 rounded-md hover:bg-green-700 disabled:bg-gray-400"
-                        >
-                            {isExporting ? 'Đang xuất...' : 'Xuất Excel'}
-                        </button>
+                        {!isAdmin && (
+                            <button
+                                onClick={handleExport}
+                                disabled={isExporting}
+                                className="px-4 py-2 font-semibold text-white bg-green-600 rounded-md hover:bg-green-700 disabled:bg-gray-400"
+                            >
+                                {isExporting ? 'Đang xuất...' : 'Xuất Excel'}
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>

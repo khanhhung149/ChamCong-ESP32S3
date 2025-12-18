@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/authServices.js';
+import authService from '../services/authServices.js';
 
 const StatusBadge = ({ status }) => {
     let colorClass = 'bg-gray-200 text-gray-800';
@@ -17,6 +18,9 @@ const ManagerRequestPage = () => {
     const [requests, setRequests] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const currentUser = authService.getUser();
+    const isManager = currentUser?.role === 'manager';
+    const isAdmin = currentUser?.role === 'admin';
 
     const fetchAllRequests = async () => {
         setLoading(true);
@@ -44,7 +48,7 @@ const ManagerRequestPage = () => {
 
     return (
         <div className="space-y-6">
-            <h1 className="text-3xl font-bold text-gray-800">Duyệt Yêu cầu</h1>
+            <h1 className="text-3xl font-bold text-gray-800">{isManager ? "Duyệt Yêu cầu" : "Danh sách Yêu cầu (Admin View)"}</h1>
 
             <div className="p-6 bg-white rounded-xl shadow-lg">
                 <table className="min-w-full divide-y divide-gray-200">
@@ -55,7 +59,8 @@ const ManagerRequestPage = () => {
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Lý do</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ngày gửi</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Trạng thái</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Hành động</th>
+                            
+                            {isManager && (<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Hành động</th>)}
                         </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
@@ -68,6 +73,7 @@ const ManagerRequestPage = () => {
                                 <td className="px-6 py-4 text-sm text-gray-600 max-w-xs truncate">{req.reason}</td>
                                 <td className="px-6 py-4 text-sm text-gray-500">{new Date(req.createdAt).toLocaleDateString('vi-VN')}</td>
                                 <td className="px-6 py-4 text-sm"><StatusBadge status={req.status} /></td>
+                                {isManager && (
                                 <td className="px-6 py-4 text-sm space-x-2">
                                     {req.status === 'Chờ duyệt' && (
                                         <>
@@ -86,6 +92,7 @@ const ManagerRequestPage = () => {
                                         </>
                                     )}
                                 </td>
+                                )}
                             </tr>
                         ))}
                     </tbody>

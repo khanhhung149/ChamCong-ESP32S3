@@ -94,7 +94,7 @@ const EmployeeDashboard = () => {
                 />
                 <div>
                     <h2 className="text-2xl font-bold text-gray-900">{user?.name}</h2>
-                    <p className="text-gray-500">{user?.email}</p>
+                    <p className="text-gray-500">{user?.account}</p>
                     <p className="text-gray-500">Mã NV: {user?.employee_id}</p>
                     <span className="mt-2 px-3 py-1 inline-flex text-sm leading-5 font-semibold rounded-full bg-green-100 text-green-800">
                         {user?.role}

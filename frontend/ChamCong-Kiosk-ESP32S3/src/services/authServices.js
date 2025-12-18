@@ -20,8 +20,8 @@ api.interceptors.request.use(
 );
 
 
-const login = async (email, password) => {
-  const response = await api.post('/api/auth/login', { email, password });
+const login = async (account, password) => {
+  const response = await api.post('/api/auth/login', { account, password });
   
   if (response.data.token) {
     localStorage.setItem('token', response.data.token);

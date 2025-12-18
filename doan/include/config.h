@@ -1,11 +1,10 @@
-#pragma once // Đảm bảo file này chỉ được import 1 lần
+#pragma once
 
 // --- Cấu hình Mạng ---
-// (Đây là nơi duy nhất bạn cần sửa khi đổi WiFi hoặc IP)
-#define WIFI_SSID       "KHANH HUNG VNPT"
-#define WIFI_PASSWORD   "0978395904"
+#define WIFI_SSID       "Cafe Goc"
+#define WIFI_PASSWORD   "20252026"
 
-#define API_HOST        "192.168.88.119" // (IP của máy tính chạy server)
+#define API_HOST        "192.168.1.119" 
 #define API_PORT        5000
 
 // --- Cấu hình Thời gian & I2C ---

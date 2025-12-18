@@ -1,6 +1,10 @@
 import User from '../models/User.js';
 import bcrypt from 'bcrypt';
 import AttendanceLog from '../models/Attendance.js';
+import Request from '../models/Request.js';
+import Attendance from '../models/Attendance.js'; // <--- Import thêm Attendance
+import fs from 'fs'; // <--- Import thư viện thao tác file
+import path from 'path';
 
 export const resetAllEnrollment = async (req, res) => {
     try {
@@ -19,13 +23,18 @@ export const resetAllEnrollment = async (req, res) => {
 };
 
 export const updateUserEnrollStatus = async (req, res) => {
-    const { employee_id, is_enrolled } = req.body;
+    const { employee_id, is_enrolled, face_vector } = req.body;
     try{
-        const user =await User.findOne({employee_id});
+        const user = await User.findOne({employee_id});
         if(!user){
             return  res.status(404).json({message: "Nhân viên không tồn tại"});
         }
         user.is_enrolled = is_enrolled;
+
+        if (face_vector && Array.isArray(face_vector)) {
+            user.face_vector = face_vector;
+            console.log(`Đã lưu vector khuôn mặt cho ${user.name} (${face_vector.length} chiều)`);
+        }
         await user.save();
         res.status(200).json({ message: "Cập nhật thành công" });
     }
@@ -39,36 +48,52 @@ export const updateUserEnrollStatus = async (req, res) => {
     
 };
 
-export const createUser = async (req, res) =>{
-    const {name, email, password, role} = req.body;
-    try{
-        if(!name || !email || !password || !role){
-            return res.status(400).json({message: "Vui lòng điền đầy đủ thông tin"})
+export const createUser = async (req, res) => {
+    const { name, account, password, role } = req.body;
+    const creator = req.user;
+    try {
+        if (!name || !account || !password || !role) {
+            return res.status(400).json({ message: "Vui lòng điền đầy đủ thông tin" });
         }
 
-        let newEmployeeId = "NV001"
 
-        const lastUser = await User.findOne().sort({ createdAt: -1 });
+        if (creator.role === 'manager' && role !== 'employee') {
+            return res.status(403).json({ 
+                message: "Manager chỉ có quyền tạo tài khoản Nhân viên (Employee)." 
+            });
+        }
+
+        // Kiểm tra account/email đã tồn tại chưa
+        const accountExists = await User.findOne({ account });
+        if (accountExists) {
+            return res.status(400).json({ message: "Tên tài khoản đã được sử dụng" });
+        }
+
+        // --- LOGIC SINH MÃ NHÂN VIÊN TỰ ĐỘNG ---
+        let prefix = "NV"; 
+        if (role === 'manager') prefix = "MGR";
+
+        let newEmployeeId = `${prefix}001`;
+
+        // Tìm user cuối cùng có cùng role để lấy số thứ tự tiếp theo
+        // Lưu ý: Dùng Regex để tìm đúng prefix (NV, MGR...)
+        const lastUser = await User.findOne({ 
+            employee_id: { $regex: `^${prefix}` } // Tìm những ID bắt đầu bằng prefix
+        }).sort({ createdAt: -1 });
 
         if (lastUser && lastUser.employee_id) {
-            // Lấy phần số từ mã cũ (VD: "NV005" -> "005")
-            const currentIdStr = lastUser.employee_id.replace("NV", ""); 
+            // Lấy phần số: "MGR005" -> "005"
+            const currentIdStr = lastUser.employee_id.replace(prefix, ""); 
             const currentIdNum = parseInt(currentIdStr);
 
             if (!isNaN(currentIdNum)) {
-                // Cộng thêm 1
                 const nextIdNum = currentIdNum + 1;
-                // Format lại thành 3 chữ số (VD: 6 -> "006")
-                newEmployeeId = "NV" + nextIdNum.toString().padStart(3, "0");
+                // Format lại: 6 -> "006"
+                newEmployeeId = prefix + nextIdNum.toString().padStart(3, "0");
             }
         }
-        console.log("Đang tạo nhân viên mới với ID:", newEmployeeId);
-
-        const emailExists = await User.findOne({email});
-        if(emailExists){
-            return res.status(400).json({message: "Email đã được sử dụng"});
-        }
         
+        console.log(`Creating ${role}: ${newEmployeeId}`);
 
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
@@ -76,7 +101,7 @@ export const createUser = async (req, res) =>{
         const newUser = new User({
             name,
             employee_id: newEmployeeId,
-            email,
+            account,
             password: hashedPassword,
             role
         });
@@ -86,12 +111,11 @@ export const createUser = async (req, res) =>{
         res.status(201).json({
             _id: savedUser._id,
             name: savedUser.name,
-            email: savedUser.email,
+            account: savedUser.account,
             role: savedUser.role,
             employee_id: savedUser.employee_id
-        })
-    }
-    catch(error){
+        });
+    } catch (error) {
         console.log(error);
         res.status(500).json({
             message: "Lỗi server",
@@ -100,40 +124,140 @@ export const createUser = async (req, res) =>{
     }
 };
 
-export const getAllUsers = async(req, res) =>{
-    try{
-        const users = await User.find({}).select('-password').sort({createdAt: -1});
+export const getAllUsers = async (req, res) => {
+    try {
+        const currentUser = req.user; // Lấy info người đang login từ middleware protect
+        let filter = {};
+
+        // 1. Nếu là Manager: Chỉ được xem Employee
+        if (currentUser.role === 'manager') {
+            filter = { role: 'employee' };
+        }
+        // 2. Nếu là Admin: Xem tất cả NHƯNG TRỪ các tài khoản Admin (ẩn chính mình và admin khác)
+        else if (currentUser.role === 'admin') {
+            filter = { role: { $ne: 'admin' } }; // $ne là Not Equal
+        }
+        // (Nếu sau này có role khác thì mặc định filter rỗng hoặc chặn tùy bạn)
+
+        // Lấy danh sách theo bộ lọc
+        const users = await User.find(filter)
+            .select('-password') // Không trả về mật khẩu
+            .sort({ createdAt: -1 });
+
         res.status(200).json(users);
-    }
-
-    catch(error){
+    } catch (error) {
         console.log(error);
-        res.status(500).json({
-            message: "Lỗi server",
-            error: error.message
-        });
+        res.status(500).json({ message: "Lỗi server", error: error.message });
     }
 }
 
-export const deleteUser = async(req, res) =>{
-    try{
-        const user = await User.findById(req.params.id);
-        if(user){
-            await AttendanceLog.deleteMany({ employee_id: user.employee_id });
-            await user.deleteOne();
-            res.status(200).json({message: "Xóa thành công"});
+const safeDeleteFile = (filePath) => {
+    try {
+        if (!filePath) return;
+        const absolutePath = path.resolve(filePath);
+        if (fs.existsSync(absolutePath) && fs.lstatSync(absolutePath).isFile()) {
+            fs.unlinkSync(absolutePath);
+            console.log(`[FILE] Đã xóa: ${absolutePath}`);
         }
-        else{
-            res.status(404).json({message: "Nhân viên không tồn tại"});
+    } catch (err) { console.error(`[ERR] Lỗi xóa file: ${err.message}`); }
+};
+
+export const deleteUser = async (req, res) => {
+    try {
+        const userId = req.params.id;
+        const user = await User.findById(userId);
+        
+        if (!user) return res.status(404).json({ message: "User not found" });
+
+        const employeeIdToDelete = user.employee_id; 
+        const userObjectId = user._id;
+
+        console.log(`--- BẮT ĐẦU QUY TRÌNH XÓA NHÂN VIÊN: ${employeeIdToDelete} ---`);
+
+        // 1. Xóa Face Model JSON (Nếu có)
+        if (user.face_model_path) safeDeleteFile(user.face_model_path);
+
+        // 2. Xóa Avatar
+        if (user.avatar_path) safeDeleteFile(user.avatar_path);
+
+        if (employeeIdToDelete) {
+            // =========================================================
+            // [MỚI] 3. XÓA ẢNH ENROLL TRONG THƯ MỤC PUBLIC/FACES
+            // =========================================================
+            const facesDir = path.join(process.cwd(), 'public', 'faces');
+            
+            if (fs.existsSync(facesDir)) {
+                try {
+                    const files = fs.readdirSync(facesDir);
+                    console.log(`[SCAN] Đang quét thư mục Faces: ${facesDir}`);
+                    
+                    let deletedFaceCount = 0;
+                    files.forEach(file => {
+                        // Ảnh enroll có tên dạng: ENROLL_NV001_1723...jpg
+                        // Chỉ cần tên file có chứa Mã nhân viên là xóa
+                        if (file.includes(employeeIdToDelete)) {
+                            const fullPath = path.join(facesDir, file);
+                            safeDeleteFile(fullPath);
+                            deletedFaceCount++;
+                        }
+                    });
+                    console.log(`[SCAN] Đã xóa ${deletedFaceCount} ảnh Enroll.`);
+                } catch (err) {
+                    console.error("[ERR] Lỗi khi quét thư mục faces:", err);
+                }
+            }
+
+            // =========================================================
+            // 4. XÓA ẢNH CHẤM CÔNG TRONG PUBLIC/ATTENDANCE_IMGS
+            // =========================================================
+            const attDir = path.join(process.cwd(), 'public', 'attendance_imgs');
+            
+            if (fs.existsSync(attDir)) {
+                try {
+                    const files = fs.readdirSync(attDir);
+                    console.log(`[SCAN] Đang quét thư mục ảnh chấm công: ${attDir}`);
+                    
+                    let deletedAttCount = 0;
+                    files.forEach(file => {
+                        if (file.includes(employeeIdToDelete)) {
+                            const fullPath = path.join(attDir, file);
+                            safeDeleteFile(fullPath);
+                            deletedAttCount++;
+                        }
+                    });
+                    console.log(`[SCAN] Đã xóa ${deletedAttCount} ảnh chấm công.`);
+                } catch (err) {
+                    console.error("[ERR] Lỗi khi quét thư mục ảnh chấm công:", err);
+                }
+            }
+
+            // Xóa dữ liệu log chấm công trong DB
+            await Attendance.deleteMany({ employee_id: employeeIdToDelete });
         }
+
+        // 5. Xóa Request xin nghỉ phép, v.v.
+        if (Request) {
+             await Request.deleteMany({ 
+                $or: [{ employee_id: employeeIdToDelete }, { user: userObjectId }]
+            });
+        }
+        
+        // 6. Xóa User khỏi DB
+        await User.findByIdAndDelete(userId);
+
+        // 7. Gửi lệnh xuống Thiết bị (để ESP32 xóa cache nếu có)
+        if (req.broadcastToDevices) {
+             req.broadcastToDevices(`delete:${employeeIdToDelete}`); 
+             console.log(`[WS] Đã gửi lệnh delete:${employeeIdToDelete} xuống thiết bị`);
+        }
+
+        res.status(200).json({ success: true, message: "Đã xóa thành công toàn bộ dữ liệu." });
+
+    } catch (error) {
+        console.error("Delete Error:", error);
+        res.status(500).json({ message: "Lỗi Server", error: error.message });
     }
-    catch(error){
-        res.status(500).json({
-            message: 'Lỗi server', 
-            error: error.message
-        })
-    }
-}
+};
 
 export const getUserById = async(req, res) =>{
     try{
@@ -159,7 +283,7 @@ export const updateUser = async(req, res) =>{
             return res.status(404).json({message: "Nhân viên không tồn tại"});
         }
         user.name = req.body.name || user.name;
-        user.email = req.body.email || user.email;
+        user.account = req.body.account || user.account;
         user.role = req.body.role || user.role;
         user.employee_id = req.body.employee_id || user.employee_id;
 
@@ -167,7 +291,7 @@ export const updateUser = async(req, res) =>{
         res.status(200).json({
             _id: updateUser._id,
             name: updateUser.name,
-            email: updateUser.email,
+            account: updateUser.account,
             role: updateUser.role,
             employee_id: updateUser.employee_id
         });

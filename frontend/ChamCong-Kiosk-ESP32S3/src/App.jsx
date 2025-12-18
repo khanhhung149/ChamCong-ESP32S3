@@ -16,6 +16,8 @@ import { BiSolidUserCheck } from "react-icons/bi";
 import { CgProfile } from "react-icons/cg";
 import { CiSquareQuestion } from "react-icons/ci";
 import { WebSocketProvider } from './contexts/WebSocketContext.jsx';
+import { FaSignOutAlt } from "react-icons/fa";
+
 
 
 
@@ -35,21 +37,37 @@ const SidebarLink = ({ to, children, end=false }) => (
   </NavLink>
 );
 
-const ManagerLayout = () => (
-  <div className="flex h-screen bg-gray-100">
-  
-    <div className="flex w-64 flex-col bg-gray-800 text-white">
+const MobileNavLink = ({ to, children, icon, end=false }) => (
+  <NavLink
+    to={to}
+    end={end}
+    className={({ isActive }) =>
+      `flex flex-col items-center justify-center w-full py-2 text-xs font-medium transition-colors
+      ${isActive
+        ? 'text-blue-600'
+        : 'text-gray-500 hover:text-gray-700'
+      }`
+    }
+  >
+    <span className="mb-1 text-xl">{icon}</span>
+    <span className="truncate max-w-[60px]">{children}</span>
+  </NavLink>
+);
 
-      <div className="flex h-16 items-center justify-center px-4 shadow-md">
-        <h1 className="text-xl font-bold text-white">Manager</h1>
-        <NotificationBell userRole="manager" />
+const MainLayout = ({ role, title }) => (
+  <div className="flex h-screen bg-gray-100 flex-col md:flex-row">
+    <div className="hidden md:flex w-64 flex-col bg-gray-800 text-white flex-shrink-0">
+      <div className="flex h-16 items-center justify-center px-4 shadow-md bg-gray-900">
+        <h1 className="text-xl font-bold text-white">{title}</h1>
+        <NotificationBell userRole={role} />
       </div>
 
       <nav className="flex-1 space-y-2 p-4">
-        <SidebarLink to="/manager" end><TbLayoutDashboardFilled className='mr-1' size={16}/>Trang chủ</SidebarLink>
-        <SidebarLink to="/manager/employees"> <FaUsers className='mr-1' size={16}/>Quản lý nhân viên</SidebarLink>
-        <SidebarLink to="/manager/reports"><TbClockCheck className='mr-1' size={16}/>Báo cáo</SidebarLink>
-        <SidebarLink to="/manager/requests"><BiSolidUserCheck className='mr-1' size={16}/>Duyệt yêu cầu</SidebarLink>
+        {/* Link điều hướng động dựa theo role */}
+        <SidebarLink to={`/${role}`} end><TbLayoutDashboardFilled className='mr-1' size={16}/>Trang chủ</SidebarLink>
+        <SidebarLink to={`/${role}/employees`}><FaUsers className='mr-1' size={16}/>Nhân viên</SidebarLink>
+        <SidebarLink to={`/${role}/reports`}><TbClockCheck className='mr-1' size={16}/>Báo cáo</SidebarLink>
+        <SidebarLink to={`/${role}/requests`}><BiSolidUserCheck className='mr-1' size={16}/>Duyệt YC</SidebarLink>
       </nav>
 
       <div className="p-4">
@@ -58,30 +76,50 @@ const ManagerLayout = () => (
             authService.logout();
             window.location.href = '/login';
           }}
-          className="w-full px-4 py-2 font-semibold text-white bg-red-600 rounded-md hover:bg-red-700"
+          className="flex items-center justify-center gap-2 w-full px-4 py-2 font-semibold text-white bg-red-600 rounded-md hover:bg-red-700"
         >
-          Đăng xuất
+          <FaSignOutAlt size={16} />
+          <span>Đăng xuất</span>
         </button>
       </div>
     </div>
-    <div className="flex-1 flex-col overflow-y-auto">
-      <div className="container mx-auto p-6">
-        <Outlet /> 
-      </div>
+
+    {/* Mobile & Main Content */}
+    <div className="flex-1 flex flex-col overflow-hidden h-full relative">
+        <div className="md:hidden flex items-center justify-between bg-gray-800 text-white p-4 shadow-md z-10">
+            <h1 className="text-lg font-bold">{title}</h1>
+            <NotificationBell userRole={role} />
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 pb-20 md:pb-6">
+            <Outlet /> 
+        </div>
+
+        <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-50 flex justify-around pb-safe">
+            <MobileNavLink to={`/${role}`} end icon={<TbLayoutDashboardFilled />}>Home</MobileNavLink>
+            <MobileNavLink to={`/${role}/employees`} icon={<FaUsers />}>NV</MobileNavLink>
+            <MobileNavLink to={`/${role}/reports`} icon={<TbClockCheck />}>Báo cáo</MobileNavLink>
+            <MobileNavLink to={`/${role}/requests`} icon={<BiSolidUserCheck />}>Duyệt</MobileNavLink>
+            <button onClick={() => { authService.logout(); window.location.href = '/login'; }} className="flex flex-col items-center justify-center w-full py-2 text-xs font-medium text-red-500">
+                <span className="mb-1 text-xl"><FaSignOutAlt /></span><span>Thoát</span>
+            </button>
+        </div>
     </div>
   </div>
 );
 
 const EmployeeLayout = () => (
-  <div className="flex h-screen bg-gray-100">
-    <div className="flex w-64 flex-col bg-gray-800 text-white">
+  <div className="flex h-screen bg-gray-100 flex-col md:flex-row">
+    
+    {/* Desktop Sidebar */}
+    <div className="hidden md:flex w-64 flex-col bg-gray-800 text-white flex-shrink-0">
       <div className="flex h-16 items-center justify-center px-4 shadow-md">
         <h1 className="text-xl font-bold text-white">Employee</h1>
         <NotificationBell userRole="employee" />
       </div>
       <nav className="flex-1 space-y-2 p-4">
         <SidebarLink to="/employee" end><CgProfile className='mr-1' size={16}/>Trang cá nhân</SidebarLink>
-        <SidebarLink to="/employee/requests"><CiSquareQuestion className='mr-1' size={16}/>Yêu cầu của tôi</SidebarLink>
+        <SidebarLink to="/employee/requests"><CiSquareQuestion className='mr-1' size={16}/>Yêu cầu</SidebarLink>
       </nav>
       <div className="p-4">
         <button 
@@ -89,16 +127,42 @@ const EmployeeLayout = () => (
             authService.logout();
             window.location.href = '/login';
           }}
-          className="w-full px-4 py-2 font-semibold text-white bg-red-600 rounded-md hover:bg-red-700"
-        >
-          Đăng xuất
+          className="flex items-center justify-center gap-2 w-full px-4 py-2 font-semibold text-white bg-red-600 rounded-md hover:bg-red-700"
+    >
+      <FaSignOutAlt size={16} />
+      <span>Đăng xuất</span>
         </button>
       </div>
     </div>
 
-    <div className="flex-1 flex-col overflow-y-auto">
-      <div className="container mx-auto p-6">
+    {/* Main Content */}
+    <div className="flex-1 flex flex-col overflow-hidden h-full relative">
+       {/* Mobile Header */}
+       <div className="md:hidden flex items-center justify-between bg-gray-800 text-white p-4 shadow-md z-10">
+            <h1 className="text-lg font-bold">Nhân viên</h1>
+            <NotificationBell userRole="employee" />
+        </div>
+
+      <div className="flex-1 overflow-y-auto p-4 pb-20 md:pb-6">
         <Outlet /> 
+      </div>
+
+      {/* Mobile Bottom Nav */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-50 flex justify-around pb-safe">
+        <MobileNavLink to="/employee" end icon={<CgProfile />}>Hồ sơ</MobileNavLink>
+        <MobileNavLink to="/employee/requests" icon={<CiSquareQuestion />}>Yêu cầu</MobileNavLink>
+        <button 
+            onClick={() => {
+                if(window.confirm('Đăng xuất?')) {
+                    authService.logout();
+                    window.location.href = '/login';
+                }
+            }}
+            className="flex flex-col items-center justify-center w-full py-2 text-xs font-medium text-red-500"
+        >
+            <span className="mb-1 text-xl"><FaSignOutAlt /></span>
+            <span>Thoát</span>
+        </button>
       </div>
     </div>
   </div>
@@ -113,10 +177,8 @@ function App() {
         <Route 
           path="/manager" 
           element={<ProtectedRoute role="manager">
-            <WebSocketProvider>
-              <ManagerLayout />
-              </WebSocketProvider>
-            </ProtectedRoute>}
+            <WebSocketProvider><MainLayout role="manager" title="Quản lý" /></WebSocketProvider>
+          </ProtectedRoute>}
         >
           <Route index element={<ManagerDashboard />} /> 
           <Route path="employees" element={<ManagePage />} />
@@ -124,6 +186,20 @@ function App() {
           <Route path="requests" element={<ManagerRequestPage />} />
           <Route path="employees/:id" element={<EmployeeProfilePage />} />
           
+        </Route>
+
+        <Route 
+          path="/admin" 
+          element={<ProtectedRoute role="admin">
+            <WebSocketProvider><MainLayout role="admin" title="Quản trị viên" /></WebSocketProvider>
+          </ProtectedRoute>}
+        >
+          {/* Admin dùng chung các trang với Manager nhưng sẽ có quyền cao hơn bên trong từng trang */}
+          <Route index element={<ManagerDashboard />} /> 
+          <Route path="employees" element={<ManagePage />} />
+          <Route path="reports" element={<ReportPage />} /> 
+          <Route path="requests" element={<ManagerRequestPage />} />
+          <Route path="employees/:id" element={<EmployeeProfilePage />} />
         </Route>
 
         
@@ -149,6 +225,7 @@ function App() {
 const HomeRedirect = () => {
   const user = authService.getUser();
   if (!user) return <Navigate to="/login" replace />;
+  if (user.role === 'admin') return <Navigate to="/admin" replace />;
   if (user.role === 'manager') return <Navigate to="/manager" replace />;
   if (user.role === 'employee') return <Navigate to="/employee" replace />;
   return <Navigate to="/login" replace />;

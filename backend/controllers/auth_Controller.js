@@ -4,9 +4,9 @@ import jwt from 'jsonwebtoken';
 
 export const login = async (req, res) => {
     try {
-        const { email, password } = req.body;
+        const { account, password } = req.body;
 
-        const user = await User.findOne({ email }); 
+        const user = await User.findOne({ account }); 
 
         if (!user || !(await bcrypt.compare(password, user.password))) {
             return res.status(401).json({ success: false, message: "Sai Email hoặc Mật khẩu" });
@@ -16,7 +16,7 @@ export const login = async (req, res) => {
             _id: user._id,
             role: user.role,
             name: user.name,
-            email: user.email, 
+            account: user.account, 
             employee_id: user.employee_id
           },
             process.env.JWT_SECRET, {expiresIn: '10d'}
@@ -29,7 +29,7 @@ export const login = async (req, res) => {
             user: { 
                 _id: user._id,
                 name: user.name,
-                email: user.email,
+                account: user.account,
                 role: user.role,
                 employee_id: user.employee_id
             }

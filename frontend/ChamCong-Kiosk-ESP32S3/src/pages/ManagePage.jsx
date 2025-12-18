@@ -2,6 +2,7 @@ import React, {useState, useEffect} from 'react'
 import { Link } from 'react-router-dom';
 import { useWebSocket } from '../contexts/WebSocketContext.jsx';
 import { api } from '../services/authServices.js';
+import authService from '../services/authServices.js';
 
 const Button= ({children, onClick, className='', type='button'}) =>(
     <button type={type} onClick={onClick} className={`px-4 py-2 font-semibold text-white transition-colors duration-200 rounded-md ${className}`}>
@@ -23,8 +24,11 @@ const ManagePage = () => {
     const [users, setUsers] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+
+    const currentUser = authService.getUser(); 
+    const isAdmin = currentUser?.role === 'admin';
     
-    const { kioskCount, lastTextMessage, sendWsMessage, isWsReady } = useWebSocket();
+    const { deviceCount, lastTextMessage, sendWsMessage, isWsReady } = useWebSocket();
     const [adminWsStatus, setAdminWsStatus] = useState('Đang kết nối Server...');
 
     const [isEnrolling, setIsEnrolling] = useState(false);
@@ -33,7 +37,7 @@ const ManagePage = () => {
     const [formData, setFormData]= useState({
         name:'',
         // employee_id:'',
-        email:'',
+        account:'',
         password:'',
         role:'employee'
     });
@@ -61,9 +65,7 @@ const ManagePage = () => {
                 setEnrollStatusText('');
                 setAdminWsStatus('Đã kết nối Server');
             }, 3000);
-        } else if (lastTextMessage === 'db_cleared') {
-            alert('Database trên Kiosk đã bị xóa!');
-        }
+        } 
     }, [lastTextMessage]);
 
     const fetchUsers = async()=>{
@@ -83,18 +85,32 @@ const ManagePage = () => {
     fetchUsers();
   }, []);
 
-  const handleDelete = async(userId, name) =>{
-    if(window.confirm(`Bạn có chắc chắn muốn xóa nhân viên ${name}?`)){
-    try{
-        await api.delete(`/api/users/${userId}`);
+  const handleDelete = async (userId, name, employeeId) => {
+    // 1. Hỏi xác nhận
+    if (!window.confirm(`Bạn có chắc chắn muốn xóa nhân viên ${name}?`)) return;
+
+    // 2. Gửi lệnh xóa xuống thiết bị qua WebSocket (Dùng hàm từ hook của bạn)
+    if (isWsReady) {
+      sendWsMessage(`delete:${employeeId}`); // <--- Dùng hàm này thay vì ws.send
+    } else {
+      console.warn("WS chưa sẵn sàng, lệnh xóa trên thiết bị có thể bị trễ");
+    }
+
+    // 3. Gọi API xóa Backend (Xóa DB, xóa ảnh)
+    try {
+      // Gọi API xóa user (Backend sẽ lo việc xóa file ảnh và DB)
+      const res = await api.delete(`/api/users/${userId}`); 
+      
+      if (res.data.success) {
+        // Cập nhật lại danh sách trên giao diện
         setUsers(prevUsers => prevUsers.filter(user => user._id !== userId));
+        // alert("Đã xóa thành công!"); // Hoặc dùng toast nếu có
+      }
+    } catch (error) {
+      console.error("Lỗi khi xóa nhân viên:", error);
+        alert(error.response?.data?.message || 'Lỗi khi xóa nhân viên');
     }
-    catch(error){
-        setError('Lỗi khi xóa nhân viên');
-        console.log(error);
-    }
-    }
-  }
+  };
 
   const handleInputChange = (e) =>{
     const {name, value} = e.target;
@@ -106,7 +122,7 @@ const ManagePage = () => {
 
   const handleSubmit = async(e) =>{
     e.preventDefault();
-    if(!formData.email || !formData.password || !formData.name){
+    if(!formData.account || !formData.password || !formData.name){
         setError('Vui lòng điền tất cả các trường thông tin bắt buộc.');
         return;
     }
@@ -114,7 +130,7 @@ const ManagePage = () => {
         const res = await api.post('/api/users', formData);
             setUsers(prevUsers => [res.data, ...prevUsers]);
             setFormData({
-                name:'', email:'', password:'', role:'employee'
+                name:'', account:'', password:'', role:'employee'
             });
             setError('');
     }
@@ -126,45 +142,25 @@ const ManagePage = () => {
   }
 
 
-    const handleEnroll = (employeeId) => {
-        if (kioskCount === 0) {
-            alert('Kiosk đang Offline! Không thể gửi lệnh.');
+    const handleEnroll = (user) => {
+        if (deviceCount === 0) {
+            alert('Device đang Offline! Không thể gửi lệnh.');
             return;
         }
-        if (!employeeId) {
-            alert('Lỗi: Nhân viên này chưa có Mã NV (employee_id).');
-            return;
+        
+        let confirmMsg = `Bạn muốn kích hoạt Device để đăng ký khuôn mặt cho ${user.name} (${user.employee_id})?`;
+        
+        // Cảnh báo nếu đã đăng ký rồi
+        if (user.is_enrolled) {
+            confirmMsg = `⚠️ CẢNH BÁO: Nhân viên ${user.name} ĐÃ CÓ dữ liệu khuôn mặt.\n\nBạn có chắc chắn muốn ĐĂNG KÝ LẠI (ghi đè dữ liệu cũ) không?`;
         }
-        if (window.confirm(`Bạn có muốn kích hoạt Kiosk để đăng ký khuôn mặt cho ${employeeId}?`)) {
-            setAdminWsStatus(`Đang gửi lệnh enroll cho ${employeeId}...`);
-            sendWsMessage(`enroll:${employeeId}`);
+
+        if (window.confirm(confirmMsg)) {
+            setAdminWsStatus(`Đang gửi lệnh enroll cho ${user.employee_id}...`);
+            sendWsMessage(`enroll:${user.employee_id}`);
         }
     };
 
-    const handleClearKioskDB = async () => {
-        if (kioskCount === 0) {
-            alert('Kiosk đang Offline! Không thể gửi lệnh.');
-            return;
-        }
-        if (window.confirm('CẢNH BÁO: Bạn có CHẮC muốn XÓA HẾT khuôn mặt trên Kiosk VÀ reset trạng thái database?')) {
-            try {
-                sendWsMessage('delete_all');
-                await api.post('/api/users/reset-all-enrollment');
-                alert('Đã xóa DB Kiosk và reset trạng thái server.');
-
-                fetchUsers(); 
-            } catch (error) {
-                alert('Có lỗi xảy ra khi reset server: ' + error.message);
-            }
-        }
-    };
-    const handleDumpDB = () => {
-        if (kioskCount === 0) {
-            alert('Kiosk đang Offline! Không thể gửi lệnh.');
-            return;
-        }
-        sendWsMessage('dump_db');
-    };
 
     const LoadingModal = ({ text }) => (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm">
@@ -174,30 +170,20 @@ const ManagePage = () => {
             </div>
         </div>
     );
+
+    const rolePrefix = isAdmin ? '/admin' : '/manager';
   return (
         <div className='space-y-6'>
-
-            {console.log("RENDER: isEnrolling =", isEnrolling)}
             {isEnrolling && <LoadingModal text={enrollStatusText} />}
 
             <div className="flex items-center justify-between">
-                <h1 className='text-3xl font-bold text-gray-800'>Quản lý Nhân viên & Kiosk</h1>
-                <StatusBadge 
-                    status={kioskCount > 0 ? `Kiosk Online (${kioskCount})` : 'Kiosk Offline'} 
-                />
+                <h1 className='text-3xl font-bold text-gray-800'>
+                    {isAdmin ? "Quản trị Hệ thống (Admin)" : "Quản lý Nhân viên"}
+                </h1>
+                <StatusBadge status={deviceCount > 0 ? `Device Online (${deviceCount})` : 'Device Offline'} />
             </div>
 
-            <div className='p-6 bg-white rounded-xl shadow-lg'>
-                <h2 className='text-xl font-semibold mb-5 text-gray-700'>Điều khiển Kiosk (UC-07, 08)</h2>
-                <div className="flex space-x-3">
-                    <Button onClick={handleClearKioskDB} className="bg-red-600 hover:bg-red-700 disabled:opacity-50" disabled={!isWsReady}>
-                        Xóa sạch DB Kiosk
-                    </Button>
-                    <Button onClick={handleDumpDB} className="bg-yellow-500 hover:bg-yellow-600 disabled:opacity-50" disabled={!isWsReady}>
-                        Dump DB (Kiểm tra)
-                    </Button>
-                </div>
-            </div>
+            {/* ĐÃ XÓA CÁC NÚT CLEAR DB & DUMP DB TẠI ĐÂY */}
 
             <div className='p-6 bg-white rounded-xl shadow-lg'>
                 <h2 className='text-xl font-semibold mb-5 text-gray-700'>Thêm Nhân viên mới</h2>
@@ -208,11 +194,15 @@ const ManagePage = () => {
                             <input type="text" name="name" value={formData.name} onChange={handleInputChange}
                                 className='mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500' />
                         </div>
-                        
+                        {/* <div>
+                            <label className='block text-sm font-medium text-gray-700'>Email</label>
+                            <input type="email" name="email" value={formData.email} onChange={handleInputChange}
+                                className='mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500' />
+                        </div> */}
                         <div>
-                            <label className='block text-sm font-medium text-gray-700'>Email *</label>
+                            <label className='block text-sm font-medium text-gray-700'>Tên tài khoản *</label>
                             <input
-                                className='mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500' type="email" name="email" value={formData.email} onChange={handleInputChange} />
+                                className='mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500' type="text" name="account" value={formData.account} onChange={handleInputChange} />
                         </div>
                         <div>
                             <label className='block text-sm font-medium text-gray-700'>Mật khẩu *</label>
@@ -227,7 +217,13 @@ const ManagePage = () => {
                                 className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-white focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                             >
                                 <option value="employee">Nhân viên</option>
-                                <option value="manager">Quản lý</option>
+
+                                {/* [SỬA LẠI] Chỉ Admin mới thấy quyền Manager và Admin */}
+                                {isAdmin && (
+                                    <>
+                                        <option value="manager">Quản lý</option>
+                                    </>
+                                )}
                             </select>
                         </div>
                     </div>
@@ -253,8 +249,9 @@ const ManagePage = () => {
                                 <tr>
                                     <th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider'>Mã NV</th>
                                     <th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider'>Tên</th>
-                                    <th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider'>Email</th>
+                                    <th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider'>Tên tài khoản</th>
                                     <th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider'>Chức vụ</th>
+                                    <th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider'>Trạng thái</th>
                                     <th className='px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider'>Hành động</th>
                                 </tr>
                             </thead>
@@ -263,22 +260,51 @@ const ManagePage = () => {
                                     <tr key={user._id} className='hover:bg-gray-50'>
                                         <td className='px-6 py-4 whitespace-nowrap text-sm text-gray-900'>{user.employee_id}</td>
                                         <td className='px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900'>
-                                            <Link to={`/manager/employees/${user._id}`} className="text-blue-600 hover:underline">
-                                                {user.name}
-                                            </Link>
+                                            <span className="text-gray-900">{user.name}</span>
                                         </td>
-                                        <td className='px-6 py-4 whitespace-nowrap text-sm text-gray-500'>{user.email}</td>
-                                        <td className='px-6 py-4 whitespace-nowrap text-sm text-gray-500'>{user.role === 'manager' ? (
-                                            <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">Quản lý</span>
-                                        ) : (
-                                            <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Nhân viên</span>
-                                        )}
+                                        <td className='px-6 py-4 whitespace-nowrap text-sm text-gray-500'>{user.account}</td>
+                                        <td className='px-6 py-4 whitespace-nowrap text-sm text-gray-500'>
+                                            {user.role === 'admin' ? (
+                                                <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-purple-100 text-purple-800">Admin</span>
+                                            ) : user.role === 'manager' ? (
+                                                <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">Quản lý</span>
+                                            ) : (
+                                                <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Nhân viên</span>
+                                            )}
                                         </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                            <Button className='bg-green-600 hover:bg-green-700 text-xs' onClick={() => handleEnroll(user.employee_id)}>
-                                                Đăng ký
+
+                                        <td className='px-6 py-4 whitespace-nowrap text-sm'>
+                                            {user.is_enrolled ? (
+                                                <span className="px-2 py-1 text-xs font-semibold text-green-700 bg-green-100 rounded-full">
+                                                    Đã có dữ liệu
+                                                </span>
+                                            ) : (
+                                                <span className="px-2 py-1 text-xs font-semibold text-gray-600 bg-gray-200 rounded-full">
+                                                    Chưa đăng ký
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                                            {/* Nút đăng ký thông minh */}
+                                            {isAdmin && (
+                                                <Link to={`${rolePrefix}/employees/${user._id}`}>
+                                                    <Button className='bg-blue-500 hover:bg-blue-600 text-xs'>
+                                                        Sửa
+                                                    </Button>
+                                                </Link>
+                                            )}
+                                            <Button 
+                                                className={`text-xs ${user.is_enrolled ? 'bg-yellow-500 hover:bg-yellow-600' : 'bg-green-600 hover:bg-green-700'}`} 
+                                                onClick={() => handleEnroll(user)}
+                                            >
+                                                {user.is_enrolled ? 'Đăng ký lại' : 'Đăng ký'}
                                             </Button>
-                                            <Button className='bg-red-600 hover:bg-red-700 text-xs' onClick={() => handleDelete(user._id, user.name)}>Xóa</Button>
+                                            
+                                            {isAdmin && (
+                                                <Button className='bg-red-600 hover:bg-red-700 text-xs' onClick={() => handleDelete(user._id, user.name, user.employee_id)}>
+                                                    Xóa
+                                                </Button>
+                                            )}
                                         </td>
                                     </tr>
                                 ))}

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import authService from '../services/authServices.js';
 
 const Login = () => {
-    const [email, setEmail] = useState('');
+    const [account, setAccount] = useState('');
     const [password,setPassword] = useState('');
     const [error, setError]= useState('');
     const navigate = useNavigate();
@@ -11,13 +11,18 @@ const Login = () => {
         e.preventDefault();
         setError('');
         try{
-            const data = await authService.login(email, password);
+            const data = await authService.login(account, password);
 
-            if (data.user && data.user.role ==='manager'){
-                navigate('/manager');
-            }
-            else if (data.user) { 
-                navigate('/employee');
+            if (data.user) {
+                // [CẬP NHẬT] Phân quyền điều hướng
+                if (data.user.role === 'admin') {
+                    navigate('/admin');
+                } else if (data.user.role === 'manager') {
+                    navigate('/manager');
+                } else {
+                    // Mặc định là nhân viên
+                    navigate('/employee');
+                }
             } else {
                 setError('Đăng nhập thành công nhưng không lấy được thông tin user.');
             }
@@ -34,18 +39,18 @@ const Login = () => {
         <form onSubmit={handleSubmit}>
             
             <div className='mb-4'>
-                <label htmlFor="email" className='block text-gray-200 font-medium'>Email</label>
-                <input type="email" 
-                placeholder='Địa chỉ email'
+                <label htmlFor="account" className='block text-gray-200 font-medium'>Tài khoản</label>
+                <input type="text" 
+                placeholder='Tài khoản'
                 className='w-full bg-transparent border border-gray-300/50 rounded-md px-3 py-2 text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-white/70'
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => setAccount(e.target.value)}
                 required
                 />
             </div>
             <div className='mb-4'>
-                <label htmlFor="password" className='block text-gray-200 font-medium'>Password</label>
+                <label htmlFor="password" className='block text-gray-200 font-medium'>Mật khẩu</label>
                 <input type="password" 
-                placeholder='Mật khẩu' 
+                placeholder='Nhập mật khẩu' 
                 className='w-full bg-transparent border border-gray-300/50 rounded-md px-3 py-2 text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-white/70'
                 onChange={(e) => setPassword(e.target.value)}
                 required

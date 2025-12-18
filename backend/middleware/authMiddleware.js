@@ -31,17 +31,16 @@ const protect = async (req, res, next) =>{
     }
 };
 
-const isManager = (req, res, next) =>{
-    if(req.user && req.user.role ==='manager'){
+const authorize = (...roles) => {
+    return (req, res, next) => {
+        if (!req.user || !roles.includes(req.user.role)) {
+            return res.status(403).json({
+                success: false,
+                message: `Quyền hạn '${req.user ? req.user.role : 'none'}' không được phép truy cập.`
+            });
+        }
         next();
-    }
-    else{
-        res.status(403).json({
-            success:false,
-            message:"Yêu cầu quyền quản lý"
-        });
-        return;
-    }
-}
+    };
+};
 
-export { protect, isManager };
+export { protect, authorize };
