@@ -1,10 +1,10 @@
 import mongoose from "mongoose";
 
 const FaceVectorSchema = new mongoose.Schema({
-    embedding: { type: [Number], required: true }, // Vector 512 hoặc 128 chiều
-    quality: { type: Number, default: 1.0 },       // Độ rõ nét (Python trả về hoặc mặc định)
+    embedding: { type: [Number], required: true },
+    quality: { type: Number, default: 1.0 },
     createdAt: { type: Date, default: Date.now },
-    source: { type: String, default: "esp32" }     // Nguồn: esp32, web-upload, mobile...
+    source: { type: String, default: "esp32" }
 }, { _id: false });
 
 const userSchema = new mongoose.Schema({
@@ -23,7 +23,6 @@ const userSchema = new mongoose.Schema({
 
 
   is_enrolled: { type: Boolean, default: false },
-  // face_model_path: { type: String, default: "" },
   face_vector: { type: [FaceVectorSchema], default: [] }
 }, {timestamps: true});
 

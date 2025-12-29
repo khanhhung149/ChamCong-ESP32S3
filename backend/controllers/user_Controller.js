@@ -2,25 +2,12 @@ import User from '../models/User.js';
 import bcrypt from 'bcrypt';
 import AttendanceLog from '../models/Attendance.js';
 import Request from '../models/Request.js';
-import Attendance from '../models/Attendance.js'; // <--- Import thêm Attendance
-import fs from 'fs'; // <--- Import thư viện thao tác file
+import Attendance from '../models/Attendance.js'; 
+import Report from '../models/Report.js';
+import fs from 'fs';
 import path from 'path';
 
-export const resetAllEnrollment = async (req, res) => {
-    try {
-        await User.updateMany(
-            {}, 
-            { $set: { is_enrolled: false } } 
-        );
-        res.status(200).json({ message: "Đã reset trạng thái enrollment cho tất cả user." });
-    } catch (error) {
-        console.log(error);
-        res.status(500).json({
-            message: "Lỗi server khi reset enrollment",
-            error: error.message
-        });
-    }
-};
+
 
 export const updateUserEnrollStatus = async (req, res) => {
     const { employee_id, is_enrolled, face_vector } = req.body;
@@ -63,32 +50,27 @@ export const createUser = async (req, res) => {
             });
         }
 
-        // Kiểm tra account/email đã tồn tại chưa
         const accountExists = await User.findOne({ account });
         if (accountExists) {
             return res.status(400).json({ message: "Tên tài khoản đã được sử dụng" });
         }
 
-        // --- LOGIC SINH MÃ NHÂN VIÊN TỰ ĐỘNG ---
         let prefix = "NV"; 
         if (role === 'manager') prefix = "MGR";
 
         let newEmployeeId = `${prefix}001`;
 
-        // Tìm user cuối cùng có cùng role để lấy số thứ tự tiếp theo
-        // Lưu ý: Dùng Regex để tìm đúng prefix (NV, MGR...)
+
         const lastUser = await User.findOne({ 
-            employee_id: { $regex: `^${prefix}` } // Tìm những ID bắt đầu bằng prefix
+            employee_id: { $regex: `^${prefix}` } 
         }).sort({ createdAt: -1 });
 
         if (lastUser && lastUser.employee_id) {
-            // Lấy phần số: "MGR005" -> "005"
             const currentIdStr = lastUser.employee_id.replace(prefix, ""); 
             const currentIdNum = parseInt(currentIdStr);
 
             if (!isNaN(currentIdNum)) {
                 const nextIdNum = currentIdNum + 1;
-                // Format lại: 6 -> "006"
                 newEmployeeId = prefix + nextIdNum.toString().padStart(3, "0");
             }
         }
@@ -126,22 +108,18 @@ export const createUser = async (req, res) => {
 
 export const getAllUsers = async (req, res) => {
     try {
-        const currentUser = req.user; // Lấy info người đang login từ middleware protect
+        const currentUser = req.user;
         let filter = {};
 
-        // 1. Nếu là Manager: Chỉ được xem Employee
         if (currentUser.role === 'manager') {
             filter = { role: 'employee' };
         }
-        // 2. Nếu là Admin: Xem tất cả NHƯNG TRỪ các tài khoản Admin (ẩn chính mình và admin khác)
         else if (currentUser.role === 'admin') {
-            filter = { role: { $ne: 'admin' } }; // $ne là Not Equal
+            filter = { role: { $ne: 'admin' } }; 
         }
-        // (Nếu sau này có role khác thì mặc định filter rỗng hoặc chặn tùy bạn)
 
-        // Lấy danh sách theo bộ lọc
         const users = await User.find(filter)
-            .select('-password') // Không trả về mật khẩu
+            .select('-password') 
             .sort({ createdAt: -1 });
 
         res.status(200).json(users);
@@ -154,10 +132,11 @@ export const getAllUsers = async (req, res) => {
 const safeDeleteFile = (filePath) => {
     try {
         if (!filePath) return;
-        const absolutePath = path.resolve(filePath);
+        const relativePath = filePath.startsWith('/') ? filePath.substring(1) : filePath;
+        const absolutePath = path.join(process.cwd(), relativePath);
         if (fs.existsSync(absolutePath) && fs.lstatSync(absolutePath).isFile()) {
             fs.unlinkSync(absolutePath);
-            console.log(`[FILE] Đã xóa: ${absolutePath}`);
+            console.log(`[FILE] Đã xóa ảnh cũ: ${absolutePath}`);
         }
     } catch (err) { console.error(`[ERR] Lỗi xóa file: ${err.message}`); }
 };
@@ -174,16 +153,10 @@ export const deleteUser = async (req, res) => {
 
         console.log(`--- BẮT ĐẦU QUY TRÌNH XÓA NHÂN VIÊN: ${employeeIdToDelete} ---`);
 
-        // 1. Xóa Face Model JSON (Nếu có)
         if (user.face_model_path) safeDeleteFile(user.face_model_path);
-
-        // 2. Xóa Avatar
         if (user.avatar_path) safeDeleteFile(user.avatar_path);
 
         if (employeeIdToDelete) {
-            // =========================================================
-            // [MỚI] 3. XÓA ẢNH ENROLL TRONG THƯ MỤC PUBLIC/FACES
-            // =========================================================
             const facesDir = path.join(process.cwd(), 'public', 'faces');
             
             if (fs.existsSync(facesDir)) {
@@ -193,8 +166,7 @@ export const deleteUser = async (req, res) => {
                     
                     let deletedFaceCount = 0;
                     files.forEach(file => {
-                        // Ảnh enroll có tên dạng: ENROLL_NV001_1723...jpg
-                        // Chỉ cần tên file có chứa Mã nhân viên là xóa
+
                         if (file.includes(employeeIdToDelete)) {
                             const fullPath = path.join(facesDir, file);
                             safeDeleteFile(fullPath);
@@ -207,9 +179,6 @@ export const deleteUser = async (req, res) => {
                 }
             }
 
-            // =========================================================
-            // 4. XÓA ẢNH CHẤM CÔNG TRONG PUBLIC/ATTENDANCE_IMGS
-            // =========================================================
             const attDir = path.join(process.cwd(), 'public', 'attendance_imgs');
             
             if (fs.existsSync(attDir)) {
@@ -231,21 +200,21 @@ export const deleteUser = async (req, res) => {
                 }
             }
 
-            // Xóa dữ liệu log chấm công trong DB
             await Attendance.deleteMany({ employee_id: employeeIdToDelete });
+            if (Report) {
+                await Report.deleteMany({ employee_id: employeeIdToDelete });
+                console.log(`[DB] Đã xóa toàn bộ Report của ${employeeIdToDelete}`);
+            }
         }
 
-        // 5. Xóa Request xin nghỉ phép, v.v.
         if (Request) {
              await Request.deleteMany({ 
                 $or: [{ employee_id: employeeIdToDelete }, { user: userObjectId }]
             });
         }
         
-        // 6. Xóa User khỏi DB
         await User.findByIdAndDelete(userId);
 
-        // 7. Gửi lệnh xuống Thiết bị (để ESP32 xóa cache nếu có)
         if (req.broadcastToDevices) {
              req.broadcastToDevices(`delete:${employeeIdToDelete}`); 
              console.log(`[WS] Đã gửi lệnh delete:${employeeIdToDelete} xuống thiết bị`);
@@ -331,6 +300,9 @@ export const uploadMyAvatar = async (req, res) => {
         const user = await User.findById(req.user._id);
         if (!req.file) {
             return res.status(400).json({ message: 'Vui lòng chọn 1 file ảnh' });
+        }
+        if (user.avatar_path && !user.avatar_path.includes("default.png")) {
+            safeDeleteFile(user.avatar_path);
         }
         
         const avatarPath = `/public/avatars/${req.file.filename}`;

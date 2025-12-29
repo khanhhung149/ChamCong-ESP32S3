@@ -5,5 +5,6 @@ const API_HOST = window.location.hostname === 'localhost' ? SERVER_IP : window.l
 
 const API_PORT = 5000;
 
+
 export const API_BASE_URL = `http://${API_HOST}:${API_PORT}`;
 export const WS_URL = `ws://${API_HOST}:${API_PORT}/ws`;

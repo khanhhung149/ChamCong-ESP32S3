@@ -3,42 +3,39 @@ import { api } from '../services/authServices.js';
 import { API_BASE_URL } from '../config.js';
 import { saveAs } from 'file-saver';
 import authService from '../services/authServices.js';
+import { FaFileExcel, FaSearch, FaFilter } from "react-icons/fa";
 
 const PaginationControls = ({ currentPage, totalPages, onPageChange }) => {
     if (totalPages <= 1) return null;
-
     const pageNumbers = [];
-    for (let i = 1; i <= totalPages; i++) {
-        pageNumbers.push(i);
-    }
+    for (let i = 1; i <= totalPages; i++) pageNumbers.push(i);
 
     return (
-        <div className="flex justify-center items-center space-x-2 mt-6">
+        <div className="flex justify-center items-center gap-2 mt-6">
             <button
                 onClick={() => onPageChange(currentPage - 1)}
                 disabled={currentPage === 1}
-                className="px-4 py-2 font-medium bg-gray-200 rounded-md disabled:opacity-50 hover:bg-gray-300"
+                className="px-3 py-1 bg-white border border-gray-300 rounded text-sm hover:bg-gray-50 disabled:opacity-50 transition-colors"
             >
                 Trước
             </button>
-
             {pageNumbers.map(number => (
                 <button
                     key={number}
                     onClick={() => onPageChange(number)}
-                    className={`px-4 py-2 rounded-md font-medium ${currentPage === number
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-200 hover:bg-gray-300'
-                        }`}
+                    className={`w-8 h-8 rounded flex items-center justify-center text-sm font-medium transition-all ${
+                        currentPage === number
+                            ? 'bg-blue-600 text-white shadow-md transform scale-105'
+                            : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
+                    }`}
                 >
                     {number}
                 </button>
             ))}
-
             <button
                 onClick={() => onPageChange(currentPage + 1)}
                 disabled={currentPage === totalPages}
-                className="px-4 py-2 font-medium bg-gray-200 rounded-md disabled:opacity-50 hover:bg-gray-300"
+                className="px-3 py-1 bg-white border border-gray-300 rounded text-sm hover:bg-gray-50 disabled:opacity-50 transition-colors"
             >
                 Tiếp
             </button>
@@ -46,14 +43,20 @@ const PaginationControls = ({ currentPage, totalPages, onPageChange }) => {
     );
 };
 const ImageCell = ({ path }) => {
-    if (!path) return <span className="text-gray-400">N/A</span>;
+    if (!path) return <span className="text-gray-300 text-[10px] block mt-1">-</span>;
     return (
-        <a href={`${API_BASE_URL}${path}`} target="_blank" rel="noopener noreferrer">
-            <img 
-                src={`${API_BASE_URL}${path}`}
-                alt="Proof" 
-                className="w-12 h-16 object-cover rounded-md shadow-sm hover:scale-150 transition-transform"
-            />
+        <a href={`${API_BASE_URL}${path}`} target="_blank" rel="noopener noreferrer" className="block mt-1 group relative">
+            <div className="w-10 h-10 mx-auto rounded overflow-hidden border border-gray-200 shadow-sm group-hover:ring-2 group-hover:ring-blue-400 transition-all">
+                <img 
+                    src={`${API_BASE_URL}${path}`} 
+                    alt="Proof" 
+                    className="w-full h-full object-cover transform group-hover:scale-110 transition-transform duration-300"
+                />
+            </div>
+            {/* Tooltip hint */}
+            <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-0.5 bg-black text-white text-[9px] rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
+                Xem ảnh
+            </span>
         </a>
     );
 };
@@ -140,83 +143,153 @@ const ReportPage = () => {
         setIsExporting(false);
     };
   return (
-        <div className="space-y-6">
-            <h1 className="text-3xl font-bold text-gray-800">{isAdmin ? "Bảng chấm công" : "Báo cáo Chấm công"}</h1>
+        <div className="space-y-6 animate-fade-in-up">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <h1 className="text-3xl font-bold text-gray-800">
+                    {isAdmin ? "Quản lý chấm công" : "Báo cáo chấm công"}
+                </h1>
+                
+                {/* Nút Xuất Excel */}
+                {!isAdmin && (
+                    <button
+                        onClick={handleExport}
+                        disabled={isExporting}
+                        className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded shadow transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+                    >
+                        {isExporting ? <span className="animate-spin"></span> : <FaFileExcel />}
+                        {isExporting ? 'Đang xuất...' : 'Xuất Excel'}
+                    </button>
+                )}
+            </div>
 
-            <div className="p-6 bg-white rounded-xl shadow-lg">
-                <h2 className="text-xl font-semibold mb-4 text-gray-700">Bộ lọc báo cáo</h2>
-                <div className="flex flex-wrap items-end gap-4">
-                    <div className="flex-1 min-w-[200px]">
-                        <label className="block text-sm font-medium text-gray-700">Từ ngày</label>
-                        <input 
-                        value={startDate}
-                        onChange={e => setStartDate(e.target.value)}
-                        type="date" className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"/>
+            {/* --- Bộ Lọc --- */}
+            <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
+                <div className="flex flex-col sm:flex-row gap-4 items-end">
+                    <div className="w-full sm:w-auto flex-1">
+                        <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">Từ ngày</label>
+                        <input
+                            type="date"
+                            value={startDate}
+                            onChange={e => setStartDate(e.target.value)}
+                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                        />
                     </div>
-                    <div className="flex-1 min-w-[200px]">
-                        <label className="block text-sm font-medium text-gray-700">Đến ngày</label>
-                        <input 
-                        value={endDate}
-                        onChange={e => setEndDate(e.target.value)}
-                        type="date" className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"/>
+                    <div className="w-full sm:w-auto flex-1">
+                        <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">Đến ngày</label>
+                        <input
+                            type="date"
+                            value={endDate}
+                            onChange={e => setEndDate(e.target.value)}
+                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                        />
                     </div>
-                    <div className="flex gap-4">
-                        <button
-                            onClick={handleFilterClick}
-                            disabled={loading}
-                            className="px-4 py-2 font-semibold text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:bg-gray-400"
-                        >
-                            {loading ? 'Đang tải...' : 'Lọc Báo cáo'}
-                        </button>
-                        {!isAdmin && (
-                            <button
-                                onClick={handleExport}
-                                disabled={isExporting}
-                                className="px-4 py-2 font-semibold text-white bg-green-600 rounded-md hover:bg-green-700 disabled:bg-gray-400"
-                            >
-                                {isExporting ? 'Đang xuất...' : 'Xuất Excel'}
-                            </button>
-                        )}
-                    </div>
+                    <button
+                        onClick={handleFilterClick}
+                        disabled={loading}
+                        className="w-full sm:w-auto px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-medium shadow-md transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                    >
+                        <FaSearch size={14} />
+                        Lọc dữ liệu
+                    </button>
                 </div>
             </div>
 
-            <div className="p-6 bg-white rounded-xl shadow-lg">
+            {/* --- Bảng Dữ Liệu --- */}
+            <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
                 <div className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50">
-                            <tr>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tên</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Mã NV</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ngày</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Giờ vào</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ảnh vào</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Giờ ra</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ảnh ra</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tổng giờ</th>
+                        <thead>
+                            <tr className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wider font-bold">
+                                <th className="px-6 py-4 text-left">Nhân viên</th>
+                                <th className="px-2 py-4 text-center border-l border-gray-100 text-green-700">Vào Sáng</th>
+                                <th className="px-2 py-4 text-center border-l border-gray-100 text-yellow-700">Ra Trưa</th>
+                                <th className="px-2 py-4 text-center border-l border-gray-100 text-orange-700">Vào Chiều</th>
+                                <th className="px-2 py-4 text-center border-l border-gray-100 text-red-700">Ra Về</th>
+                                <th className="px-4 py-4 text-left border-l border-gray-100">Trạng thái</th>
+                                <th className="px-4 py-4 text-center border-l border-gray-100 text-blue-700">Tổng giờ</th>
                             </tr>
                         </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
-                            {logs.map(log => (
-                                <tr key={log._id} className="hover:bg-gray-50">
-                                    <td className="px-6 py-4 text-sm font-medium text-gray-900">{log.name}</td>
-                                    <td className="px-6 py-4 text-sm font-medium text-gray-900">{log.employee_id}</td>
-                                    <td className="px-6 py-4 text-sm text-gray-500">{new Date(log.date).toLocaleDateString('vi-VN')}</td>
-                                    <td className="px-6 py-4 text-sm text-green-600 font-semibold">{formatTime(log.checkInTime)}</td>
-                                    <td className="px-6 py-4"><ImageCell path={log.checkInImage} /></td>
-                                    <td className="px-6 py-4 text-sm text-red-600 font-semibold">{formatTime(log.checkOutTime)}</td>
-                                    <td className="px-6 py-4"><ImageCell path={log.checkOutImage} /></td>
-                                    <td className="px-6 py-4 text-sm font-bold text-gray-900">{log.totalHours ? `${log.totalHours} h` : '...'}</td>
+                        <tbody className="bg-white divide-y divide-gray-100">
+                            {loading ? (
+                                <tr><td colSpan="7" className="p-10 text-center text-gray-500 italic">Đang tải dữ liệu...</td></tr>
+                            ) : logs.length === 0 ? (
+                                <tr><td colSpan="7" className="p-10 text-center text-gray-500">Không tìm thấy dữ liệu nào.</td></tr>
+                            ) : logs.map((log) => (
+                                <tr key={log._id} className="hover:bg-blue-50 transition-colors duration-150">
+                                    {/* Cột 1: Thông tin NV */}
+                                    <td className="px-6 py-4 whitespace-nowrap">
+                                        <div className="flex flex-col">
+                                            <span className="text-sm font-bold text-gray-900">{log.name}</span>
+                                            <span className="text-xs text-gray-500 font-mono">{log.employee_id}</span>
+                                            <span className="text-[10px] text-gray-400 mt-1">{new Date(log.date).toLocaleDateString('vi-VN')}</span>
+                                        </div>
+                                    </td>
+
+                                    {/* Cột 2: Vào Sáng */}
+                                    <td className="px-2 py-3 text-center border-l border-gray-50 align-top">
+                                        <div className="text-sm font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded inline-block">
+                                            {formatTime(log.checkInTime)}
+                                        </div>
+                                        <ImageCell path={log.checkInImage} />
+                                    </td>
+
+                                    {/* Cột 3: Ra Trưa */}
+                                    <td className="px-2 py-3 text-center border-l border-gray-50 align-top">
+                                        <div className="text-sm font-medium text-gray-600 bg-yellow-50 px-2 py-0.5 rounded inline-block">
+                                            {formatTime(log.checkOutTimeMorning)}
+                                        </div>
+                                        <ImageCell path={log.checkOutImageMorning} />
+                                    </td>
+
+                                    {/* Cột 4: Vào Chiều */}
+                                    <td className="px-2 py-3 text-center border-l border-gray-50 align-top">
+                                        <div className="text-sm font-medium text-gray-600 bg-orange-50 px-2 py-0.5 rounded inline-block">
+                                            {formatTime(log.checkInTimeAfternoon)}
+                                        </div>
+                                        <ImageCell path={log.checkInImageAfternoon} />
+                                    </td>
+
+                                    {/* Cột 5: Ra Về */}
+                                    <td className="px-2 py-3 text-center border-l border-gray-50 align-top">
+                                        <div className="text-sm font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded inline-block">
+                                            {formatTime(log.checkOutTime)}
+                                        </div>
+                                        <ImageCell path={log.checkOutImage} />
+                                    </td>
+
+                                    {/* Cột 6: Ghi chú */}
+                                    <td className="px-4 py-4 border-l border-gray-50 align-middle">
+                                        <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold
+                                            ${log.note && (log.note.includes('trễ') || log.note.includes('Vắng')) 
+                                                ? 'bg-red-100 text-red-800 border border-red-200' 
+                                                : 'bg-green-100 text-green-800 border border-green-200'}`}>
+                                            {log.status || "Check-in"}
+                                        </span>
+                                        {log.note && (
+                                            <p className="text-xs text-gray-500 mt-1.5 max-w-[180px] truncate" title={log.note}>
+                                                {log.note}
+                                            </p>
+                                        )}
+                                    </td>
+
+                                    {/* Cột 7: Tổng giờ */}
+                                    <td className="px-4 py-4 text-center border-l border-gray-50 align-middle">
+                                        <span className="text-sm font-bold text-blue-600">{log.totalHours ? `${log.totalHours}h` : '-'}</span>
+                                    </td>
                                 </tr>
                             ))}
                         </tbody>
                     </table>
                 </div>
-                <PaginationControls
-                    currentPage={currentPage}
-                    totalPages={totalPages}
-                    onPageChange={handlePageChange}
-                />
+
+                {/* Footer Bảng & Phân trang */}
+                <div className="bg-gray-50 p-4 border-t border-gray-200">
+                    <PaginationControls
+                        currentPage={currentPage}
+                        totalPages={totalPages}
+                        onPageChange={handlePageChange}
+                    />
+                </div>
             </div>
         </div>
     );

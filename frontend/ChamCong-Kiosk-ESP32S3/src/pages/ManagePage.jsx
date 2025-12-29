@@ -150,7 +150,6 @@ const ManagePage = () => {
         
         let confirmMsg = `Bạn muốn kích hoạt Device để đăng ký khuôn mặt cho ${user.name} (${user.employee_id})?`;
         
-        // Cảnh báo nếu đã đăng ký rồi
         if (user.is_enrolled) {
             confirmMsg = `⚠️ CẢNH BÁO: Nhân viên ${user.name} ĐÃ CÓ dữ liệu khuôn mặt.\n\nBạn có chắc chắn muốn ĐĂNG KÝ LẠI (ghi đè dữ liệu cũ) không?`;
         }
@@ -178,12 +177,11 @@ const ManagePage = () => {
 
             <div className="flex items-center justify-between">
                 <h1 className='text-3xl font-bold text-gray-800'>
-                    {isAdmin ? "Quản trị Hệ thống (Admin)" : "Quản lý Nhân viên"}
+                    {isAdmin ? "Quản trị hệ thống (Admin)" : "Quản lý nhân viên"}
                 </h1>
                 <StatusBadge status={deviceCount > 0 ? `Device Online (${deviceCount})` : 'Device Offline'} />
             </div>
 
-            {/* ĐÃ XÓA CÁC NÚT CLEAR DB & DUMP DB TẠI ĐÂY */}
 
             <div className='p-6 bg-white rounded-xl shadow-lg'>
                 <h2 className='text-xl font-semibold mb-5 text-gray-700'>Thêm Nhân viên mới</h2>
@@ -194,11 +192,6 @@ const ManagePage = () => {
                             <input type="text" name="name" value={formData.name} onChange={handleInputChange}
                                 className='mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500' />
                         </div>
-                        {/* <div>
-                            <label className='block text-sm font-medium text-gray-700'>Email</label>
-                            <input type="email" name="email" value={formData.email} onChange={handleInputChange}
-                                className='mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500' />
-                        </div> */}
                         <div>
                             <label className='block text-sm font-medium text-gray-700'>Tên tài khoản *</label>
                             <input
@@ -218,7 +211,6 @@ const ManagePage = () => {
                             >
                                 <option value="employee">Nhân viên</option>
 
-                                {/* [SỬA LẠI] Chỉ Admin mới thấy quyền Manager và Admin */}
                                 {isAdmin && (
                                     <>
                                         <option value="manager">Quản lý</option>
@@ -285,7 +277,6 @@ const ManagePage = () => {
                                             )}
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                                            {/* Nút đăng ký thông minh */}
                                             {isAdmin && (
                                                 <Link to={`${rolePrefix}/employees/${user._id}`}>
                                                     <Button className='bg-blue-500 hover:bg-blue-600 text-xs'>

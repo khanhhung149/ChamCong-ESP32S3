@@ -1,44 +1,39 @@
 import mongoose from "mongoose";
-import { type } from "os";
 
 const attendanceSchema = new mongoose.Schema({
-    name:{
-        type: String,
-        required: true
-    },
-    employee_id: { 
+    name:{ type: String, required: true},
+    employee_id: { type: String, required: true},
+    date: { type: Date, required: true },
+    checkInTime: { type: Date, required: true},
+    checkInImage: { type: String, required: true},
+    checkOutTimeMorning: { type: Date },
+    checkOutImageMorning: { type: String },
+    checkInTimeAfternoon: { type: Date },
+    checkInImageAfternoon: { type: String },
+    checkOutTime: {type: Date},
+    checkOutImage: {type: String},
+    note: { type: String, default: "" },
+    status: { 
         type: String, 
-        required: true 
+        default: "Đúng giờ" 
     },
-    date: {
-        type: Date,
-        required: true
-    },
-    checkInTime: {
-        type: Date,
-        required: true
-    },
-    checkInImage: {
-        type: String,
-        required: true
-    },
-    checkOutTime: {
-        type: Date
-    },
-    checkOutImage: {
-        type: String
-    }
+    session: { type: String, enum: ['Sáng','Trưa', 'Chiều'], default: 'Sáng' },
 }, { 
     timestamps: false, 
     virtuals: {
         totalHours: {
             get() {
-                if (this.checkInTime && this.checkOutTime) {
-                    const diffMs = this.checkOutTime - this.checkInTime;
-                    const hours = diffMs / (1000 * 60 * 60);
-                    return parseFloat(hours.toFixed(2)); 
+                let totalMs = 0;
+                if (this.checkInTime && this.checkOutTimeMorning) {
+                    totalMs += (this.checkOutTimeMorning - this.checkInTime);
                 }
-                return null;
+                if (this.checkInTimeAfternoon && this.checkOutTime) {
+                    totalMs += (this.checkOutTime - this.checkInTimeAfternoon);
+                }
+                if (this.checkInTime && this.checkOutTime && !this.checkOutTimeMorning && !this.checkInTimeAfternoon) {
+                     totalMs = (this.checkOutTime - this.checkInTime);
+                }
+                return parseFloat((totalMs / (1000 * 60 * 60)).toFixed(2));
             }
         }
     },

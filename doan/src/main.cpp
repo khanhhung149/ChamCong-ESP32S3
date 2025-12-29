@@ -16,14 +16,16 @@
 #include <RTClib.h>   
 #include <SD_MMC.h>   
 #include <time.h>     
-#include "img_converters.h" // [QUAN TRỌNG] Thư viện xử lý ảnh
-
+#include "img_converters.h"
+#include <driver/rtc_io.h>
 // --- CẤU HÌNH PIN ---
 #define WIFI_RESET_BTN 14
+#define SDA_PIN 47
+#define SCL_PIN 21
 
 // --- BIẾN TOÀN CỤC ---
 Preferences preferences;
-char server_ip_buffer[40] = "192.168.88.119"; 
+char server_ip_buffer[40] = "192.168.137.1"; 
 int server_port = 5000;
 
 TFT_eSPI tft = TFT_eSPI();
@@ -50,46 +52,105 @@ FaceLog lastFace = {0, 0};
 #define MOTION_THRESHOLD 5   
 #define MAX_MOTION 60        
 
+volatile bool gSystemIsWorking = true;
 
-
-
-void saveOfflineData(uint8_t* jpgBuf, size_t jpgLen, String type, String extraData) {
-    if (!SD_MMC.cardSize()) {
-        Serial.println("❌ [OFFLINE] Không tìm thấy thẻ SD!");
-        return;
-    }
-
-    // 1. Tạo tên file ảnh dựa trên timestamp
-    String timestamp = getIsoTime();
-    // Thay thế ký tự đặc biệt để làm tên file (VD: 2023-10-25T10:00:00 -> 20231025_100000)
-    String safeTime = timestamp;
-    safeTime.replace("-", ""); safeTime.replace(":", ""); safeTime.replace("T", "_");
-    
-    String imgPath = "/off_" + safeTime + ".jpg";
-
-    // 2. Lưu ảnh JPEG
-    fs::File imgFile = SD_MMC.open(imgPath, FILE_WRITE);
-    if (imgFile) {
-        imgFile.write(jpgBuf, jpgLen);
-        imgFile.close();
-        Serial.printf("💾 [OFFLINE] Đã lưu ảnh: %s (%d bytes)\n", imgPath.c_str(), jpgLen);
-    } else {
-        Serial.println("❌ [OFFLINE] Lỗi ghi file ảnh!");
-        return;
-    }
-
-    // 3. Ghi metadata vào hàng đợi (queue.txt)
-    // Format: TYPE|TIMESTAMP|EXTRA_DATA|IMG_PATH
-    fs::File queueFile = SD_MMC.open("/queue.txt", FILE_APPEND);
-    if (queueFile) {
-        String line = type + "|" + timestamp + "|" + extraData + "|" + imgPath + "\n";
-        queueFile.print(line);
-        queueFile.close();
-        Serial.println("📝 [OFFLINE] Đã ghi vào hàng đợi.");
-    } else {
-        Serial.println("❌ [OFFLINE] Lỗi ghi file queue!");
-    }
+struct TimeSlot {
+    int startHour; int startMin; // Giờ mở máy
+    int endHour;   int endMin;   // Giờ tắt máy
+};
+// Định nghĩa 3 khung giờ hoạt động trong ngày
+const int NUM_SLOTS = 3;
+TimeSlot activeSlots[NUM_SLOTS] = {
+    {7, 0,  8, 15},
+    {11, 0, 13, 0},  
+    {17, 00, 21, 0}   
+};
+void saveTimeConfig() {
+    preferences.begin("chamcong-config", false);
+    preferences.putBytes("slots", activeSlots, sizeof(activeSlots));
+    preferences.end();
+    Serial.println("💾 [CONFIG] Đã lưu cấu hình giờ mới!");
 }
+
+// Hàm tải cấu hình từ Flash
+void loadTimeConfig() {
+    preferences.begin("chamcong-config", true);
+    if (preferences.isKey("slots")) {
+        preferences.getBytes("slots", activeSlots, sizeof(activeSlots));
+        Serial.println("📂 [CONFIG] Đã tải cấu hình từ bộ nhớ.");
+    } else {
+        Serial.println("⚠️ [CONFIG] Chưa có cấu hình, dùng mặc định.");
+    }
+    preferences.end();
+}
+long calculateSleepSeconds() {
+    DateTime now = rtc.now();
+    long currentSec = now.hour() * 3600 + now.minute() * 60 + now.second();
+    long dayEndSec = 24 * 3600;
+
+    // 1. Kiểm tra xem có đang trong giờ hoạt động không?
+    for (int i = 0; i < NUM_SLOTS; i++) {
+        long startSec = activeSlots[i].startHour * 3600 + activeSlots[i].startMin * 60;
+        long endSec   = activeSlots[i].endHour * 3600 + activeSlots[i].endMin * 60;
+
+        if (currentSec >= startSec && currentSec < endSec) {
+            Serial.printf("✅ Đang trong khung giờ hoạt động %d (%02d:%02d - %02d:%02d)\n", 
+                          i+1, activeSlots[i].startHour, activeSlots[i].startMin, activeSlots[i].endHour, activeSlots[i].endMin);
+            return 0; // KHÔNG NGỦ
+        }
+    }
+
+    // 2. Nếu không, tìm khung giờ mở tiếp theo
+    for (int i = 0; i < NUM_SLOTS; i++) {
+        long startSec = activeSlots[i].startHour * 3600 + activeSlots[i].startMin * 60;
+        if (startSec > currentSec) {
+            long sleepTime = startSec - currentSec;
+            Serial.printf("💤 Ngủ đợi đến khung giờ tiếp theo: %02d:%02d (còn %ld giây)\n", 
+                          activeSlots[i].startHour, activeSlots[i].startMin, sleepTime);
+            return sleepTime;
+        }
+    }
+
+    // 3. Nếu hết khung hôm nay -> Ngủ tới khung đầu tiên ngày mai
+    long firstSlotTomorrow = activeSlots[0].startHour * 3600 + activeSlots[0].startMin * 60;
+    long sleepUntilTomorrow = (dayEndSec - currentSec) + firstSlotTomorrow;
+    Serial.printf("💤 Hết giờ làm. Ngủ đợi đến sáng mai %02d:%02d (còn %ld giây)\n", 
+                  activeSlots[0].startHour, activeSlots[0].startMin, sleepUntilTomorrow);
+    
+    return sleepUntilTomorrow;
+}
+
+void enterDeepSleep(long seconds) {
+    if (seconds <= 0) return;
+
+    Serial.printf("😴 Chuẩn bị ngủ sâu trong %ld giây (%ld phút)...\n", seconds, seconds/60);
+
+    // Hiển thị thông báo trước khi tắt
+    if (xSemaphoreTake(tftMutex, portMAX_DELAY) == pdTRUE) {
+        tft.fillScreen(TFT_BLACK);
+        tft.setTextColor(TFT_DARKGREY, TFT_BLACK);  
+        xSemaphoreGive(tftMutex);
+        delay(100);
+    }
+    webSocket.disconnect();
+    WiFi.disconnect(true);  // Ngắt kết nối và xóa config
+    WiFi.mode(WIFI_OFF);
+    esp_camera_deinit();
+    SD_MMC.end();
+
+    delay(120);
+    
+    rtc_gpio_pullup_en((gpio_num_t)WIFI_RESET_BTN);
+
+    // Cấu hình đánh thức: Timer hoặc Nút bấm (GPIO 14)
+    esp_sleep_enable_timer_wakeup(seconds * 1000000ULL); 
+    esp_sleep_enable_ext0_wakeup((gpio_num_t)WIFI_RESET_BTN, 0); // 0 = LOW (nhấn nút)
+
+    Serial.println("👋 Good night!");
+    Serial.flush(); 
+    esp_deep_sleep_start();
+}
+
 
 // Hàm tách chuỗi (Helper)
 String getValue(String data, char separator, int index) {
@@ -151,7 +212,7 @@ void syncOfflineData() {
                 http.addHeader("Content-Type", "application/json");
 
                 String b64 = base64::encode(imgBuf, imgSize);
-                String payload = "{\"image\":\"" + b64 + "\",\"timestamp\":\"" + timestamp + "\"";
+                String payload = "{\"image\":\"" + b64 + "\",\"timestamp\":\"" + timestamp + "\",\"is_offline\":true";
                 if (type == "enroll") payload += ",\"employee_id\":\"" + extraData + "\"";
                 payload += "}";
 
@@ -205,6 +266,13 @@ bool isLiveMotion(face_t f) {
 
     int dx = abs(cx - lastFace.x);
     int dy = abs(cy - lastFace.y);
+
+    float movement = sqrt(dx*dx + dy*dy); 
+
+    // --- THÊM ĐOẠN NÀY ĐỂ LẤY SỐ LIỆU ---
+    Serial.print("MOTION_DATA:"); // Từ khóa để lọc
+    Serial.println(movement);
+
     lastFace.x = cx; lastFace.y = cy;
 
     return ((dx > MOTION_THRESHOLD || dy > MOTION_THRESHOLD) && 
@@ -248,9 +316,48 @@ String getIsoTime() {
 String getDateTimeString() {
     DateTime now = rtc.now();
     char buf[25];
-    sprintf(buf, "%02d/%02d %02d:%02d", now.day(), now.month(), now.hour(), now.minute());
+    sprintf(buf, "%02d/%02d/%04d %02d:%02d:%02d", now.day(), now.month(),now.year(), now.hour(), now.minute(), now.second());
     return String(buf);
 }
+
+void saveOfflineData(uint8_t* jpgBuf, size_t jpgLen, String type, String extraData) {
+    if (!SD_MMC.cardSize()) {
+        Serial.println("❌ [OFFLINE] Không tìm thấy thẻ SD!");
+        return;
+    }
+
+    // 1. Tạo tên file ảnh dựa trên timestamp
+    String timestamp = getIsoTime();
+    // Thay thế ký tự đặc biệt để làm tên file (VD: 2023-10-25T10:00:00 -> 20231025_100000)
+    String safeTime = timestamp;
+    safeTime.replace("-", ""); safeTime.replace(":", ""); safeTime.replace("T", "_");
+    
+    String imgPath = "/off_" + safeTime + ".jpg";
+
+    // 2. Lưu ảnh JPEG
+    fs::File imgFile = SD_MMC.open(imgPath, FILE_WRITE);
+    if (imgFile) {
+        imgFile.write(jpgBuf, jpgLen);
+        imgFile.close();
+        Serial.printf("💾 [OFFLINE] Đã lưu ảnh: %s (%d bytes)\n", imgPath.c_str(), jpgLen);
+    } else {
+        Serial.println("❌ [OFFLINE] Lỗi ghi file ảnh!");
+        return;
+    }
+
+    // 3. Ghi metadata vào hàng đợi (queue.txt)
+    // Format: TYPE|TIMESTAMP|EXTRA_DATA|IMG_PATH
+    fs::File queueFile = SD_MMC.open("/queue.txt", FILE_APPEND);
+    if (queueFile) {
+        String line = type + "|" + timestamp + "|" + extraData + "|" + imgPath + "\n";
+        queueFile.print(line);
+        queueFile.close();
+        Serial.println("📝 [OFFLINE] Đã ghi vào hàng đợi.");
+    } else {
+        Serial.println("❌ [OFFLINE] Lỗi ghi file queue!");
+    }
+}
+
 
 void wsSendTxt(String msg) {
     if (WiFi.status() == WL_CONNECTED) webSocket.sendTXT(msg);
@@ -258,6 +365,7 @@ void wsSendTxt(String msg) {
 
 // Gửi ảnh tổng quát (Dùng cho cả Enroll và Recognize)
 String sendImageToServer(uint8_t* jpgBuf, size_t jpgLen, String type, String extraData = "") {
+    unsigned long startNet = millis(); // Bắt đầu bấm giờ
     if (WiFi.status() == WL_CONNECTED) {
         HTTPClient http;
         http.setTimeout(8000); // 8s timeout
@@ -274,14 +382,16 @@ String sendImageToServer(uint8_t* jpgBuf, size_t jpgLen, String type, String ext
         int httpCode = http.POST(payload);
         String res = (httpCode > 0) ? http.getString() : "error";
         http.end();
+        unsigned long netDuration = millis() - startNet;
+        Serial.printf("⏱️ [LATENCY] Network Round-trip: %lu ms\n", netDuration);
 
         // Nếu gửi thành công -> Trả về kết quả server
         if (httpCode > 0 && httpCode < 400) {
             return res;
         }
-        Serial.printf("⚠️ [HTTP] Gửi lỗi (Code: %d). Chuyển sang lưu Offline.\n", httpCode);
+        Serial.printf("⚠️ [HTTP] Gửi lỗi (Code: %d). Chuyển sang lưu ngoại tuyến.\n", httpCode);
     } else {
-        Serial.println("⚠️ [WIFI] Mất kết nối. Chuyển sang lưu Offline.");
+        Serial.println("⚠️ [WIFI] Mất kết nối. Chuyển sang lưu ngoại tuyến.");
     }
 
     // 2. Nếu mất mạng hoặc gửi lỗi -> Lưu Offline
@@ -304,29 +414,96 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
                 gEnrollingInProgress = true;
             }
             if (text == "restart") ESP.restart();
+            else if (text.startsWith("{")) {
+                JsonDocument doc;
+                DeserializationError error = deserializeJson(doc, text);
+                
+                if (!error) {
+                    const char* cmdType = doc["type"];
+                    
+                    // Nếu là gói tin config_time
+                    if (strcmp(cmdType, "config_time") == 0) {
+                        JsonArray data = doc["data"];
+                        if (data.size() == NUM_SLOTS) {
+                            for (int i = 0; i < NUM_SLOTS; i++) {
+                                activeSlots[i].startHour = data[i][0];
+                                activeSlots[i].startMin  = data[i][1];
+                                activeSlots[i].endHour   = data[i][2];
+                                activeSlots[i].endMin    = data[i][3];
+                            }
+                            saveTimeConfig(); // Lưu ngay
+                            
+                            // Phản hồi lại Web
+                            webSocket.sendTXT("{\"type\":\"config_success\"}");
+                            
+                            // Vẽ thông báo lên màn hình
+                            if (xSemaphoreTake(tftMutex, 100) == pdTRUE) {
+                                tft.fillScreen(TFT_BLACK);
+                                tft.setTextColor(TFT_GREEN, TFT_BLACK);
+                                tft.drawCentreString("CAP NHAT", tft.width()/2, 100, 4);
+                                tft.drawCentreString("THANH CONG", tft.width()/2, 140, 4);
+                                xSemaphoreGive(tftMutex);
+                                delay(2000);
+                            }
+                        }
+                    }
+                }
+            }
             break;
     }
 }
 
 void NetworkTask(void *pvParameters) {
     static unsigned long lastSyncTime = 0;
+    static unsigned long lastSleepCheck = 0;
+    static bool lastWorkingState = true;
     for (;;) {
         webSocket.loop();
+        
         if (WiFi.status() != WL_CONNECTED) {
             Serial.println("⚠️ WiFi Lost. Reconnecting...");
             WiFi.reconnect();
             vTaskDelay(pdMS_TO_TICKS(5000));
-        }
-        else {
+        } else {
             // Nếu có mạng -> Kiểm tra và đồng bộ mỗi 30 giây
             if (millis() - lastSyncTime > 30000) {
-                // Chỉ đồng bộ khi không đang enroll hoặc bận camera
-                if (!gEnrollingInProgress && xSemaphoreTake(camMutex, (TickType_t)10) == pdTRUE) {
-                    xSemaphoreGive(camMutex); // Check xong nhả ra ngay
+                if (!gEnrollingInProgress && xSemaphoreTake(camMutex, (TickType_t)100) == pdTRUE) {
                     syncOfflineData();
+                    xSemaphoreGive(camMutex);
                 }
                 lastSyncTime = millis();
             }
+        }
+
+        if (millis() - lastSleepCheck > 60000) { 
+            // Chỉ ngủ khi KHÔNG đang enroll và KHÔNG nhấn nút
+            long sleepSecs = calculateSleepSeconds();
+            bool isWorking = (sleepSecs == 0);
+            gSystemIsWorking = isWorking;
+            if (isWorking && !lastWorkingState) {
+                // VỪA MỚI VÀO GIỜ LÀM (Chuyển từ Nghỉ -> Làm)
+                Serial.println("🔔 Đã vào khung giờ làm việc! Bật màn hình...");
+                if (xSemaphoreTake(tftMutex, (TickType_t)200) == pdTRUE) {
+                    // Vẽ lại màn hình chào mừng hoặc clear đen để CameraTask vẽ đè lên
+                    tft.fillScreen(TFT_BLACK);
+                    tft.setTextColor(TFT_GREEN, TFT_BLACK);
+                    tft.drawCentreString("SYSTEM READY", tft.width()/2, 120, 4);
+                    xSemaphoreGive(tftMutex);
+                }
+            }
+            if (!isWorking) {
+                // Nếu đang không enroll và không giữ nút -> NGỦ
+                if (!gEnrollingInProgress && digitalRead(WIFI_RESET_BTN) == HIGH) {
+                    if (sleepSecs > 60 && millis() > 60000) {
+                        enterDeepSleep(sleepSecs); // Hàm này sẽ reset ESP khi dậy
+                    }
+                    else if (millis() < 60000) {
+                        Serial.println("⏳ Vừa khởi động, bỏ qua chế độ ngủ để chờ kết nối...");
+                    }
+                }
+            }
+            lastWorkingState = isWorking;
+            lastSleepCheck = millis();
         }
         vTaskDelay(pdMS_TO_TICKS(10));
     }
@@ -357,24 +534,28 @@ const char* enrollSteps[] = {
 // --- TASK CHÍNH: CAMERA & LOGIC ---
 void CameraAppTask(void *pvParameters) {    
     for (;;) {
-        // =========================================================
-        // 1. MODE ENROLL (SỬA LỖI DÍNH MÀU XANH DƯƠNG)
-        // =========================================================
+        if (!gSystemIsWorking && !gEnrollingInProgress) {
+            vTaskDelay(1000);
+            continue;
+        }
         if (gEnrollingInProgress) {
             Serial.println("--- ENROLL MODE STARTED ---");
             xSemaphoreTake(tftMutex, portMAX_DELAY);
             tft.fillScreen(TFT_BLACK);
             tft.setTextColor(TFT_CYAN, TFT_BLACK);
-            tft.drawCentreString("CHE DO DANG KY", tft.width()/2, 10, 4); // Căn giữa theo chiều rộng màn hình
+            tft.drawCentreString("CHE DO DANG KY", tft.width()/2, 10, 4); 
             tft.setTextColor(TFT_WHITE, TFT_BLACK);
             tft.drawCentreString("Chuan bi...", tft.width()/2, 50, 2);
+            tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+            tft.drawCentreString("NHIN THANG CAMERA", tft.width()/2, 110, 2);
+
             xSemaphoreGive(tftMutex);
-            vTaskDelay(1500);
+            vTaskDelay(3000);
 
             int currentStep = 0;
             
             while (currentStep < 5) {
-                // 1. Chụp ảnh
+                // 1. Chụp ảnh Preview
                 xSemaphoreTake(camMutex, portMAX_DELAY);
                 if (!camera.capture().isOk()) { 
                     xSemaphoreGive(camMutex); 
@@ -384,57 +565,83 @@ void CameraAppTask(void *pvParameters) {
                 camera_fb_t* fb = camera.frame;
                 xSemaphoreGive(camMutex);
 
-                // [MẸO] Tính tọa độ để CĂN GIỮA MÀN HÌNH
                 int xPos = (tft.width() - fb->width) / 2;
                 
-                // 2. Hiển thị
+                // 2. Hiển thị Preview
                 xSemaphoreTake(tftMutex, portMAX_DELAY);
-                tft.pushImage(xPos, 0, fb->width, fb->height, (uint16_t*)fb->buf); // Vẽ ở giữa
+                tft.pushImage(xPos, 0, fb->width, fb->height, (uint16_t*)fb->buf); 
                 tft.setTextColor(TFT_YELLOW, TFT_BLACK); 
                 tft.drawString(enrollSteps[currentStep], 5, 10, 4);
                 xSemaphoreGive(tftMutex);
 
-                // 3. Detect
+                // 3. Detect & Kiểm tra khoảng cách
                 if (detection.run().isOk()) {
                     face_t f = detection.first;
-                    if (f.score > 0.85 && f.width > 35) {
+
+                    // [LOGIC MỚI] KIỂM TRA KHOẢNG CÁCH CHO ENROLL
+                    if (f.width < 55) {
                         xSemaphoreTake(tftMutex, portMAX_DELAY);
-                        // Vẽ khung xanh (cộng thêm xPos vì hình đã dịch chuyển)
-                        tft.drawRect(xPos + f.x, f.y, f.width, f.height, TFT_GREEN);
+                        tft.setTextColor(TFT_ORANGE, TFT_BLACK); // Màu cam cảnh báo
+                        tft.drawCentreString("LAI GAN HON", tft.width()/2, 195, 4);
                         xSemaphoreGive(tftMutex);
-
-                        vTaskDelay(500);
-
-                        xSemaphoreTake(camMutex, portMAX_DELAY); camera.capture(); fb = camera.frame; xSemaphoreGive(camMutex);
-
-                        uint8_t* faceBuf = nullptr; size_t faceLen = 0;
-                        if(cropFaceFromRGB565(fb, f, &faceBuf, &faceLen)) {
+                    }
+                    else if (f.width > 110) {
+                        xSemaphoreTake(tftMutex, portMAX_DELAY);
+                        tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+                        tft.drawCentreString("XA RA CHUT", tft.width()/2, 195, 4);
+                        xSemaphoreGive(tftMutex);
+                    }
+                    else {
+                        if (f.score > 0.85) {
                             xSemaphoreTake(tftMutex, portMAX_DELAY);
-                            Serial.printf("📤 [ENROLL] Đang gửi ảnh %d (%d bytes)...\n", currentStep+1, faceLen);
-                            tft.fillCircle(tft.width()-20, 20, 8, TFT_BLUE); // Đèn báo góc phải
+                            // Vẽ khung xanh xác nhận
+                            tft.drawRect(xPos + f.x, f.y, f.width, f.height, TFT_GREEN);
                             xSemaphoreGive(tftMutex);
 
-                            String res = sendImageToServer(faceBuf, faceLen, "enroll", gEnrollName);
-                            free(faceBuf);
-                            
+                            // Chờ 1 chút cho người dùng ổn định tư thế
+                            vTaskDelay(1000); 
 
-                            if (res.indexOf("collecting") > 0 || res.indexOf("success") > 0) {
-                                Serial.printf("✅ [ENROLL] Hoàn thành bước %d!\n", currentStep+1);
-                                currentStep++; 
+                            // Chụp ảnh thật để gửi
+                            xSemaphoreTake(camMutex, portMAX_DELAY); 
+                            camera.capture(); 
+                            fb = camera.frame; 
+                            xSemaphoreGive(camMutex);
+
+                            uint8_t* faceBuf = nullptr; size_t faceLen = 0;
+                            if(cropFaceFromRGB565(fb, f, &faceBuf, &faceLen)) {
                                 xSemaphoreTake(tftMutex, portMAX_DELAY);
-                                tft.fillScreen(TFT_GREEN);
-                                tft.setTextColor(TFT_BLACK, TFT_GREEN);
-                                tft.drawCentreString("OK", tft.width()/2, 120, 4);
+                                Serial.printf("📤 [ENROLL] Đang gửi ảnh %d (%d bytes)...\n", currentStep+1, faceLen);
+                                tft.fillCircle(tft.width()-20, 20, 8, TFT_BLUE); 
                                 xSemaphoreGive(tftMutex);
-                                vTaskDelay(1000); 
+
+                                String res = sendImageToServer(faceBuf, faceLen, "enroll", gEnrollName);
+                                free(faceBuf);
                                 
-                                // [QUAN TRỌNG] Xóa màn hình đen sau mỗi bước
-                                xSemaphoreTake(tftMutex, portMAX_DELAY);
-                                tft.fillScreen(TFT_BLACK);
-                                xSemaphoreGive(tftMutex);
-                            }
-                            else{
-                                Serial.printf("⚠️ [ENROLL] Server từ chối bước %d. Thử lại.\n", currentStep+1);
+                                if (res.indexOf("collecting") > 0 || res.indexOf("success") > 0) {
+                                    Serial.printf("✅ [ENROLL] Hoàn thành bước %d!\n", currentStep+1);
+                                    
+                                    xSemaphoreTake(tftMutex, portMAX_DELAY);
+                                    tft.fillScreen(TFT_GREEN);
+                                    tft.setTextColor(TFT_BLACK, TFT_GREEN);
+                                    String doneMsg = "XONG BUOC " + String(currentStep + 1);
+                                    tft.drawCentreString(doneMsg, tft.width()/2, 100, 4);
+                                    
+                                    // Nhắc chuyển sang bước sau
+                                    if (currentStep < 4) {
+                                       tft.drawCentreString("Tiep tuc...", tft.width()/2, 140, 2);
+                                    }
+                                    xSemaphoreGive(tftMutex);
+                                    vTaskDelay(2000);
+                                    
+                                    xSemaphoreTake(tftMutex, portMAX_DELAY);
+                                    tft.fillScreen(TFT_BLACK);
+                                    xSemaphoreGive(tftMutex);
+                                    currentStep++;
+                                }
+                                else{
+                                    Serial.printf("⚠️ [ENROLL] Server từ chối bước %d. Thử lại.\n", currentStep+1);
+                                    // Hiện thông báo lỗi nếu cần
+                                }
                             }
                         }
                     }
@@ -452,24 +659,19 @@ void CameraAppTask(void *pvParameters) {
             xSemaphoreGive(tftMutex);
             vTaskDelay(3000);
 
-            // [FIX LỖI DÍNH MÀU XANH DƯƠNG]
             xSemaphoreTake(tftMutex, portMAX_DELAY);
-            tft.fillScreen(TFT_BLACK); // Xóa sạch trước khi quay lại camera
+            tft.fillScreen(TFT_BLACK); 
             xSemaphoreGive(tftMutex);
 
             continue;
         }
 
-        // =========================================================
-        // 2. MODE RECOGNIZE (SỬA LỖI DÍNH MÀU XANH LÁ)
-        // =========================================================
         camera_fb_t* fb = nullptr;
         xSemaphoreTake(camMutex, portMAX_DELAY);
         if (camera.capture().isOk()) fb = camera.frame;
         xSemaphoreGive(camMutex);
         if (!fb) { vTaskDelay(30); continue; }
 
-        // [GIỮ NGUYÊN] CĂN GIỮA CAMERA
         int xPos = (tft.width() - fb->width) / 2;
 
         xSemaphoreTake(tftMutex, portMAX_DELAY);
@@ -481,143 +683,164 @@ void CameraAppTask(void *pvParameters) {
 
         if (detection.run().isOk()) {
             face_t f = detection.first;
-            
-            xSemaphoreTake(tftMutex, portMAX_DELAY);
-            tft.drawRect(xPos + f.x, f.y, f.width, f.height, TFT_CYAN); 
-            xSemaphoreGive(tftMutex);
+            Serial.printf("📏 [METRICS] Width: %d px | Confidence: %.2f\n", f.width, f.score);
+            int bX = f.x; int bY = f.y; int bW = f.width; int bH = f.height;
+            // Xử lý tọa độ âm
+            if (bX < 0) { bW += bX; bX = 0; }
+            if (bY < 0) { bH += bY; bY = 0; }
+            // Xử lý tràn phải/dưới (fb->width thường là 240)
+            if (bX + bW > fb->width)  bW = fb->width - bX;
+            if (bY + bH > fb->height) bH = fb->height - bY;
 
-            // ĐIỀU KIỆN KÍCH HOẠT BURST MODE
-            if (f.width > 30 && f.score > 0.80 && isLiveMotion(f) && (millis() - lastCaptureTime > 1000)) {
+            // Chỉ vẽ nếu kích thước > 0
+            if (bW > 0 && bH > 0) {
+                xSemaphoreTake(tftMutex, portMAX_DELAY);
+                tft.drawRect(xPos + bX, bY, bW, bH, TFT_CYAN); 
+                xSemaphoreGive(tftMutex);
+            }
+
+            // [LOGIC KHOẢNG CÁCH CHO RECOGNIZE]
+            if (f.width < 55) {
+                xSemaphoreTake(tftMutex, portMAX_DELAY);
+                tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+                tft.drawCentreString("LAI GAN HON", tft.width()/2, 195, 4);
+                xSemaphoreGive(tftMutex);
+            }
+            else if (f.width > 110) {
+                xSemaphoreTake(tftMutex, portMAX_DELAY);
+                tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+                tft.drawCentreString("XA RA CHUT", tft.width()/2, 195, 4);
+                xSemaphoreGive(tftMutex);
+            }
+            else {
+                // KHOẢNG CÁCH OK -> BURST MODE
+                if(f.score > 0.80 && isLiveMotion(f) && (millis() - lastCaptureTime > 1000)) {
                 
-                Serial.println("🚀 Bắt đầu gửi chuỗi 3 ảnh (Burst Mode)...");
-                
-                bool detectionDone = false; // Cờ đánh dấu đã xong việc
-                int attempts = 0;           // Đếm số ảnh đã gửi
-
-                // Vòng lặp gửi tối đa 4 lần (để đảm bảo đủ 3 ảnh cho server)
-                while (!detectionDone && attempts < 4) {
-                    attempts++;
-
-                    // [QUAN TRỌNG] TỪ ẢNH THỨ 2 TRỞ ĐI PHẢI CHỤP MỚI
-                    // Nếu không chụp mới, bạn sẽ gửi 3 ảnh giống hệt nhau -> Liveness sai
-                    if (attempts > 1) {
-                        xSemaphoreTake(camMutex, portMAX_DELAY);
-                        camera.capture(); // Chụp khung hình mới
-                        fb = camera.frame;
-                        xSemaphoreGive(camMutex);
-
-                        // Vẽ lại màn hình để người dùng thấy mình đang hoạt động
-                        xSemaphoreTake(tftMutex, portMAX_DELAY);
-                        tft.pushImage(xPos, 0, fb->width, fb->height, (uint16_t*)fb->buf);
-                        // tft.drawCircle(220, 20, 8, TFT_YELLOW); // Đèn vàng nháy: Đang gửi
-                        xSemaphoreGive(tftMutex);
-                        
-                        // Detect lại trên khung hình mới để lấy tọa độ crop chuẩn
-                        if (!detection.run().isOk()) {
-                            Serial.println("⚠️ Mất dấu khuôn mặt giữa chừng -> Hủy Burst");
-                            break; 
-                        }
-                        f = detection.first; // Cập nhật tọa độ mặt mới
-                    }
-
-                    uint8_t* faceBuf = nullptr; size_t faceLen = 0;
+                    Serial.println("🚀 Bắt đầu gửi chuỗi 3 ảnh (Burst Mode)...");
                     
-                    if (cropFaceFromRGB565(fb, f, &faceBuf, &faceLen)) {
-                        unsigned long startTick = millis();
-                        Serial.printf("📡 Gửi ảnh thứ %d/3...\n", attempts);
+                    bool detectionDone = false; 
+                    int attempts = 0;           
+
+                    while (!detectionDone && attempts < 3) {
+                        attempts++;
+
+                        if (attempts > 1) {
+                            xSemaphoreTake(camMutex, portMAX_DELAY);
+                            camera.capture(); 
+                            fb = camera.frame;
+                            xSemaphoreGive(camMutex);
+
+                            xSemaphoreTake(tftMutex, portMAX_DELAY);
+                            tft.pushImage(xPos, 0, fb->width, fb->height, (uint16_t*)fb->buf);
+                            xSemaphoreGive(tftMutex);
+                            
+                            if (!detection.run().isOk()) {
+                                Serial.println("⚠️ Mất dấu khuôn mặt -> Hủy Burst");
+                                break; 
+                            }
+                            f = detection.first; 
+                        }
+
+                        uint8_t* faceBuf = nullptr; size_t faceLen = 0;
                         
-                        // Gửi ảnh và CHỜ kết quả (Synchronous)
-                        String res = sendImageToServer(faceBuf, faceLen, "recognize");
-
-                        unsigned long endTick = millis();
-                        unsigned long duration = endTick - startTick;
-                        free(faceBuf); // Giải phóng RAM ngay
-
-                        if (res == "offline_saved") {
-                            xSemaphoreTake(tftMutex, portMAX_DELAY);
-                            tft.setTextColor(TFT_ORANGE, TFT_BLACK); // Màu cam cảnh báo
-                            tft.drawCentreString("DA LUU OFFLINE", 120, 200, 2);
-                            xSemaphoreGive(tftMutex);
-                            vTaskDelay(1000);
-                        }
-
-                        // --- XỬ LÝ KẾT QUẢ TỪ SERVER ---
-
-                        // 1. Server bảo "Đang gom" (collecting) -> Tiếp tục vòng lặp để gửi ảnh tiếp theo
-                        else if (res.indexOf("collecting") > 0) {
-                            // Không làm gì cả, vòng while sẽ tự chạy tiếp để gửi ảnh sau
-                            vTaskDelay(50); // Nghỉ 50ms giữa các lần chụp
-                            continue; 
-                        }
-                        
-                        // 2. Server trả kết quả MATCH -> Xong việc
-                        else if (res.indexOf("match\":true") > 0) {
-                            int n1 = res.indexOf("name\":\"") + 7;
-                            int n2 = res.indexOf("\"", n1);
-                            String name = res.substring(n1, n2);
-                            Serial.printf("✅ MATCHED: %s\n", name.c_str());
-                            Serial.printf("⏱️ THỜI GIAN XỬ LÝ: %lu ms (%.2f giây)\n", duration, duration / 1000.0);
+                        if (cropFaceFromRGB565(fb, f, &faceBuf, &faceLen)) {
+                            unsigned long startTick = millis();
+                            Serial.printf("📡 Gửi ảnh thứ %d/3...\n", attempts);
                             
-                            xSemaphoreTake(tftMutex, portMAX_DELAY);
-                            tft.fillScreen(TFT_GREEN); 
-                            tft.setTextColor(TFT_BLACK, TFT_GREEN);
-                            tft.drawCentreString("XIN CHAO", tft.width()/2, 100, 2);
-                            tft.drawCentreString(name, tft.width()/2, 130, 4);
-                            xSemaphoreGive(tftMutex);
-                            
-                            vTaskDelay(2000); 
+                            String res = sendImageToServer(faceBuf, faceLen, "recognize");
+                            unsigned long duration = millis() - startTick;
+                            free(faceBuf); 
 
-                            // Xóa màn hình
-                            xSemaphoreTake(tftMutex, portMAX_DELAY);
-                            tft.fillScreen(TFT_BLACK); 
-                            xSemaphoreGive(tftMutex);
+                            if (res == "offline_saved") {
+                                xSemaphoreTake(tftMutex, portMAX_DELAY);
+                                tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+                                tft.drawCentreString("DA LUU OFFLINE", 120, 200, 2);
+                                xSemaphoreGive(tftMutex);
+                                vTaskDelay(1000);
+                                detectionDone = true;
+                            }
+                            else if (res.indexOf("collecting") > 0) {
+                                vTaskDelay(50);
+                                continue; 
+                            }
+                            else if (res.indexOf("match\":true") > 0) {
+                                int n1 = res.indexOf("name\":\"") + 7;
+                                int n2 = res.indexOf("\"", n1);
+                                String name = res.substring(n1, n2);
+                                Serial.printf("✅ MATCHED: %s\n", name.c_str());
+                                
+                                xSemaphoreTake(tftMutex, portMAX_DELAY);
+                                tft.fillScreen(TFT_GREEN); 
+                                tft.setTextColor(TFT_BLACK, TFT_GREEN);
+                                tft.drawCentreString("XIN CHAO", tft.width()/2, 100, 2);
+                                tft.drawCentreString(name, tft.width()/2, 130, 4);
+                                xSemaphoreGive(tftMutex);
+                                vTaskDelay(2000); 
 
-                            lastCaptureTime = millis(); // Reset thời gian chờ
-                            detectionDone = true;       // Thoát vòng lặp
-                        }
-                        
-                        // 3. Server trả kết quả KHÔNG MATCH -> Xong việc
-                        else if (res.indexOf("match\":false") > 0) {
-                            Serial.println("❌ UNKNOWN");
-                            xSemaphoreTake(tftMutex, portMAX_DELAY);
-                            tft.setTextColor(TFT_RED, TFT_BLACK); 
-                            tft.drawCentreString("UNKNOWN", tft.width()/2, 200, 2);
-                            xSemaphoreGive(tftMutex);
-                            
-                            vTaskDelay(1000);
-                            
-                            xSemaphoreTake(tftMutex, portMAX_DELAY); // Xóa màn hình cho sạch
-                            tft.fillScreen(TFT_BLACK); 
-                            xSemaphoreGive(tftMutex);
+                                xSemaphoreTake(tftMutex, portMAX_DELAY);
+                                tft.fillScreen(TFT_BLACK); 
+                                xSemaphoreGive(tftMutex);
 
-                            lastCaptureTime = millis();
-                            detectionDone = true; // Thoát vòng lặp
-                        }
+                                lastCaptureTime = millis();
+                                detectionDone = true;      
+                            }
+                            else if (res.indexOf("match\":false") > 0) {
+                                Serial.println("❌ NGUOI LA");
+                                xSemaphoreTake(tftMutex, portMAX_DELAY);
+                                tft.setTextColor(TFT_RED, TFT_BLACK); 
+                                tft.drawCentreString("NGUOI LA", tft.width()/2, 200, 2);
+                                xSemaphoreGive(tftMutex);
+                                vTaskDelay(1000);
+                                
+                                xSemaphoreTake(tftMutex, portMAX_DELAY); 
+                                tft.fillScreen(TFT_BLACK); 
+                                xSemaphoreGive(tftMutex);
+
+                                lastCaptureTime = millis();
+                                detectionDone = true; 
+                            }
+                        } 
                     } 
-                } // Kết thúc while
+                }
             }
         }
         vTaskDelay(20);
     }
 }
 
-// =========================================================
-// SETUP
-// =========================================================
 void setup() {
     Serial.begin(115200);
 
-    Wire.begin(47, 21);
+    loadTimeConfig();
+
+    esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
+    if (wakeup_reason == ESP_SLEEP_WAKEUP_EXT0) {
+        Serial.println("🔔 Đã thức dậy thủ công bằng nút bấm!");
+    } else if (wakeup_reason == ESP_SLEEP_WAKEUP_TIMER) {
+        Serial.println("⏰ Đã thức dậy theo lịch trình!");
+    }
+
+    Wire.begin(SDA_PIN, SCL_PIN);
     rtc.begin();
     if (! rtc.begin()) {
         Serial.println("LOI: Khong tim thay module RTC DS3231!");
     }
     SD_MMC.setPins(39, 38, 40); 
     if(!SD_MMC.begin("/sd", true)){ 
-        Serial.println("LOI: Khong the khoi tao SD Card!");
+        Serial.println("❌ LOI: Khong the khoi tao SD Card!");
     } else {
-        Serial.println("SD Card OK.");
-
+        Serial.println("✅ SD Card OK.");
+        
+        uint64_t cardSize = SD_MMC.cardSize() / (1024 * 1024);
+        uint64_t totalBytes = SD_MMC.totalBytes() / (1024 * 1024);
+        uint64_t usedBytes = SD_MMC.usedBytes() / (1024 * 1024);
+        
+        Serial.println("📊 --- SD CARD INFO ---");
+        Serial.printf("   💾 Dung luong The: %llu MB\n", cardSize);
+        Serial.printf("   💾 Tong vung luu tru: %llu MB\n", totalBytes);
+        Serial.printf("   💾 Da su dung: %llu MB\n", usedBytes);
+        Serial.printf("   💾 Con trong:  %llu MB\n", totalBytes - usedBytes);
+        Serial.println("-----------------------");
     }
 
     tft.init(); tft.setRotation(3); tft.fillScreen(TFT_BLACK);
@@ -625,42 +848,43 @@ void setup() {
     pinMode(WIFI_RESET_BTN, INPUT_PULLUP);
 
     camera.pinout.freenove_s3();
+    camera.xclk.slow();
     camera.brownout.disable();
     camera.resolution.face(); // 240x240
     camera.quality.best();
     camera.pixformat.rgb565(); // Hiển thị mượt
     detection.accurate();
     detection.confidence(0.70);
+
+    
     
     if (!camera.begin().isOk()) { 
         tft.drawString("Cam Err", 0, 0); 
         while(1) delay(100); 
     }
     // ====== BASIC ======
-camera.sensor.setBrightness(0);     // +1 là hợp lý
-camera.sensor.setSaturation(1);     // ❗ KHÔNG để 0
-camera.sensor.setAutomaticWhiteBalance(true);
-camera.sensor.setAutomaticGainControl(true);
-camera.sensor.setExposureControl(true);
+    camera.sensor.setBrightness(1);     // +1 là hợp lý
+    camera.sensor.setSaturation(1);     // ❗ KHÔNG để 0
+    camera.sensor.setAutomaticWhiteBalance(true);
+    camera.sensor.setAutomaticGainControl(true);
+    camera.sensor.setExposureControl(true);
 
-// // ====== ADVANCED ======
-camera.sensor.configure([](sensor_t *s) {
+    // // ====== ADVANCED ======
+    camera.sensor.configure([](sensor_t *s) {
 
-    s->set_contrast(s, 1);          // Tăng tương phản
-        s->set_lenc(s, 1);              // Lens correction (Sáng 4 góc)
-        s->set_dcw(s, 1);               // Khử sai màu
-        // s->set_sharpness(s, 1);
-});
+        s->set_contrast(s, 1);          // Tăng tương phản
+            s->set_lenc(s, 1);              // Lens correction (Sáng 4 góc)
+            s->set_dcw(s, 1);               // Khử sai màu
+    });
 
     
 
     preferences.begin("kiosk-config", false);
-    String savedIP = preferences.getString("server_ip", "");
-    if(savedIP.length()>0) strcpy(server_ip_buffer, savedIP.c_str());
+    strcpy(server_ip_buffer, "192.168.137.1"); 
+    preferences.putString("server_ip", server_ip_buffer);
 
     WiFiManager wm;
     pinMode(WIFI_RESET_BTN, INPUT_PULLUP);
-    if(digitalRead(WIFI_RESET_BTN) == LOW) { wm.resetSettings(); delay(1000); }
     
     WiFiManagerParameter custom_ip("server", "IP Server", server_ip_buffer, 40);
     wm.addParameter(&custom_ip);
@@ -678,11 +902,20 @@ camera.sensor.configure([](sensor_t *s) {
     tftMutex = xSemaphoreCreateMutex();
     camMutex = xSemaphoreCreateMutex();
 
-    xTaskCreatePinnedToCore(NetworkTask, "NetTask", 4096, NULL, 3, NULL, 0);
+    xTaskCreatePinnedToCore(NetworkTask, "NetTask", 10240, NULL, 3, NULL, 0);
     xTaskCreatePinnedToCore(TimeSyncTask, "TimeTask", 2048, NULL, 1, NULL, 1);
     xTaskCreatePinnedToCore(CameraAppTask, "AppTask", 16384, NULL, 2, NULL, 1);
 
     Serial.println("System Ready!");
+
+    Serial.println("⚙️ --- SYSTEM STATUS ---");
+    Serial.printf("   🔹 Chip Model: %s (Rev %d)\n", ESP.getChipModel(), ESP.getChipRevision());
+    Serial.printf("   🔹 CPU Freq: %d MHz\n", ESP.getCpuFreqMHz());
+    Serial.printf("   🔹 Free RAM (Heap): %d bytes\n", ESP.getFreeHeap());
+    if (xSemaphoreTake(tftMutex, (TickType_t)100) == pdTRUE) {
+        tft.fillScreen(TFT_BLACK);
+        xSemaphoreGive(tftMutex);
+    }
 }
 
 void loop() {

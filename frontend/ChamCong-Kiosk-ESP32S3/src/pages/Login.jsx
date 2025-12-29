@@ -14,13 +14,11 @@ const Login = () => {
             const data = await authService.login(account, password);
 
             if (data.user) {
-                // [CẬP NHẬT] Phân quyền điều hướng
                 if (data.user.role === 'admin') {
                     navigate('/admin');
                 } else if (data.user.role === 'manager') {
                     navigate('/manager');
                 } else {
-                    // Mặc định là nhân viên
                     navigate('/employee');
                 }
             } else {
@@ -59,13 +57,6 @@ const Login = () => {
             {error && (
             <p className="mb-4 text-xs text-red-300 bg-red-900/50 p-2 rounded-md">{error}</p>
             )}
-            <div className='mb-4 flex items-center justify-between'>
-                <label className='inline-flex items-center'>
-                    <input type="checkbox" className='form-checkbox rounded text-blue-500 bg-transparent border-gray-300/50 focus:ring-blue-500/70'/>
-                    <span className='ml-2 text-gray-200 text-xs'>Ghi nhớ đăng nhập</span>
-                </label>
-                <a href="#" className='text-blue-300 hover:text-blue-100 text-xs'>Quên mật khẩu?</a>
-            </div>
             
             <div className='mb-4'>
                 <button 

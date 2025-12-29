@@ -48,7 +48,7 @@ const ManagerRequestPage = () => {
 
     return (
         <div className="space-y-6">
-            <h1 className="text-3xl font-bold text-gray-800">{isManager ? "Duyệt Yêu cầu" : "Danh sách Yêu cầu (Admin View)"}</h1>
+            <h1 className="text-3xl font-bold text-gray-800">{isManager ? "Duyệt yêu cầu" : "Danh sách yêu cầu (Admin View)"}</h1>
 
             <div className="p-6 bg-white rounded-xl shadow-lg">
                 <table className="min-w-full divide-y divide-gray-200">

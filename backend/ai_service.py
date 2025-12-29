@@ -82,8 +82,9 @@ async def extract_vector_batch(req: BatchImageRequest):
         img = base64_to_cv2(b64)
         if img is None: continue
         try:
+            
             # DeepFace detect & align & embed
-            emb = DeepFace.represent(img, model_name="ArcFace", enforce_detection=True)
+            emb = DeepFace.represent(img, model_name="ArcFace", enforce_detection=False)
             vectors.append(np.array(emb[0]["embedding"]))
         except:
             continue
@@ -98,17 +99,28 @@ async def extract_vector_batch(req: BatchImageRequest):
     # Nếu batch >= 2 ảnh thì mới tính được độ lệch chuẩn
     liveness = True
     dist_avg = 0.0
+    message = "OK"
+    dists = []
     
     if len(vectors) >= 2:
         dists = []
         for i in range(len(vectors)-1):
             d = calculate_euclidean_distance(vectors[i], vectors[i+1])
             dists.append(d)
+
         dist_avg = np.mean(dists)
+        print(f"📈 [WAVEFORM DATA] Dists Array: {dists}")
+        print(f"📊 Liveness Score (Biến thiên): {dist_avg:.4f}")
         
         # Logic Liveness
-        if dist_avg < 0.02: liveness = False # Fake (Ảnh tĩnh)
-        if dist_avg > 0.3: liveness = False  # Mờ/Nhiễu quá
+        if 0.0 < dist_avg < 0.015: 
+            liveness = False 
+            message = f"Fake/Static (Score: {dist_avg:.4f})"
+            print(f"❌ {message}")
+        if dist_avg > 1.00: 
+            liveness = False  # Mờ/Nhiễu quá
+            message = f"Too much motion/Blur (Score: {dist_avg:.4f})"
+            print(f"❌ {message}")
 
     # 3. Tính Vector trung bình (Mean Pooling)
     avg_vector = np.mean(vectors, axis=0).tolist()
@@ -120,7 +132,8 @@ async def extract_vector_batch(req: BatchImageRequest):
         "success": True,
         "vector": avg_vector,
         "liveness": liveness,
-        "debug_score": dist_avg
+        "debug_score": dist_avg,
+        "message": message
     }
 
 if __name__ == "__main__":

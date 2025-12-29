@@ -162,9 +162,29 @@ wss.on('connection', (ws, req) => {
             // 4. Xử lý lệnh từ Admin/Manager gửi xuống Device
             // [SỬA] Cho phép cả admin thực hiện
             if (ws.role === 'manager' || ws.role === 'admin') {
-                // Chỉ forward những lệnh hợp lệ (Enroll, Delete)
-                // Đã xóa 'dump_db' và 'delete_all' rác
-                if (txt.startsWith('enroll:') || txt.startsWith('delete:')) {
+                
+                // --- ĐOẠN CODE MỚI: XỬ LÝ JSON CẤU HÌNH ---
+                if (txt.startsWith('{')) {
+                    try {
+                        const jsonData = JSON.parse(txt);
+                        // Nếu là lệnh config_time -> Gửi cho Device
+                        if (jsonData.type === 'config_time') {
+                            console.log(`WS: JSON Config from ${ws.role} -> forwarding to devices`);
+                            devices.forEach(d => {
+                                if (d.readyState === WebSocket.OPEN) d.send(txt);
+                            });
+                            // Phản hồi lại cho Web là đã gửi
+                            ws.send(JSON.stringify({ type: 'config_success' }));
+                            return; 
+                        }
+                    } catch (err) {
+                        console.log("WS: Received invalid JSON from admin, treating as text");
+                    }
+                }
+                // ---------------------------------------------
+
+                // [CŨ] Xử lý lệnh Text (Enroll, Delete, Restart)
+                if (txt.startsWith('enroll:') || txt === 'restart') {
                     console.log(`WS: Command '${txt}' from ${ws.role} -> forwarding to devices`);
                     devices.forEach(d => {
                         if (d.readyState === WebSocket.OPEN) d.send(txt);
